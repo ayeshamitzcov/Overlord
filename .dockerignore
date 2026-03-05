@@ -32,6 +32,13 @@ Thumbs.db
 
 # Build outputs
 dist-clients/
+Overlord-Client/build/
+release/
+
+**/*.tsbuildinfo
+coverage/
+tmp/
+temp/
 
 # Logs
 *.log

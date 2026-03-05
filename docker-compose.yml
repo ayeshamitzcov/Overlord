@@ -24,6 +24,9 @@ services:
       # Uncomment to use a static config file instead of env vars
       # - ./Overlord-Server/config.json:/app/config.json:ro
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
     networks:
       - overlord-network
     healthcheck:
