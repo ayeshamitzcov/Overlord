@@ -27,6 +27,8 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
   const cursorCtrl = document.getElementById("cursorCtrl");
   const qualitySlider = document.getElementById("qualitySlider");
   const qualityValue = document.getElementById("qualityValue");
+  const codecH264 = document.getElementById("codecH264");
+  const codecMode = document.getElementById("codecMode");
   const canvas = document.getElementById("frameCanvas");
   const canvasContainer = document.getElementById("canvasContainer");
   const contextMenu = document.getElementById("hvncContextMenu");
@@ -46,9 +48,32 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
   let offlineTimer = null;
   let pendingMove = null;
   let moveTimer = null;
+  let videoDecoder = null;
+  let h264TimestampUs = 0;
+  const codecPrefKey = "hvncCodecPreferH264";
+  let prefersH264 = typeof VideoDecoder === "function";
   let lastMoveSentAt = 0;
   const mouseMoveIntervalMs = 33;
   const inputBackpressureBytes = 256 * 1024;
+
+  const storedCodecPref = localStorage.getItem(codecPrefKey);
+  if (storedCodecPref === "0") {
+    prefersH264 = false;
+  } else if (storedCodecPref === "1") {
+    prefersH264 = typeof VideoDecoder === "function";
+  }
+  if (codecH264) {
+    codecH264.checked = prefersH264;
+    codecH264.disabled = typeof VideoDecoder !== "function";
+  }
+
+  function setCodecModeLabel(mode, detail) {
+    if (!codecMode) return;
+    const suffix = detail ? ` (${detail})` : "";
+    codecMode.textContent = `Codec: ${String(mode || "auto").toUpperCase()}${suffix}`;
+  }
+
+  setCodecModeLabel(prefersH264 ? "h264" : "jpeg", "preferred");
   setStreamState("connecting", "Connecting");
 
   function updateFpsDisplay(agentValue) {
@@ -237,9 +262,104 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 
   function pushQuality(val) {
     const q = Number(val) || 90;
-    const codec = q >= 100 ? "raw" : "jpeg";
+    const codec = q >= 100 ? "raw" : (prefersH264 ? "h264" : "jpeg");
     console.debug("hvnc: pushQuality val=", val, "q=", q, "codec=", codec);
+    setCodecModeLabel(codec, "requested");
     sendCmd("hvnc_set_quality", { quality: q, codec });
+  }
+
+  if (codecH264) {
+    codecH264.addEventListener("change", function () {
+      prefersH264 = !!codecH264.checked && typeof VideoDecoder === "function";
+      localStorage.setItem(codecPrefKey, prefersH264 ? "1" : "0");
+      if (!prefersH264) {
+        destroyVideoDecoder();
+      }
+      if (qualitySlider) {
+        pushQuality(qualitySlider.value);
+      }
+    });
+  }
+
+  function destroyVideoDecoder() {
+    if (!videoDecoder) return;
+    try {
+      videoDecoder.close();
+    } catch {
+      // Ignore decoder close errors.
+    }
+    videoDecoder = null;
+    h264TimestampUs = 0;
+  }
+
+  function fallbackToJpegCodec(reason) {
+    if (!prefersH264) return;
+    prefersH264 = false;
+    destroyVideoDecoder();
+    if (codecH264) codecH264.checked = false;
+    localStorage.setItem(codecPrefKey, "0");
+    console.warn("hvnc: falling back to jpeg codec", reason || "");
+    const q = Number(qualitySlider?.value) || 90;
+    setCodecModeLabel("jpeg", "fallback");
+    if (ws.readyState === WebSocket.OPEN) {
+      sendCmd("hvnc_set_quality", { quality: q, codec: "jpeg" });
+    }
+  }
+
+  function isH264KeyFrame(data) {
+    for (let i = 0; i + 4 < data.length; i++) {
+      let startCodeLen = 0;
+      if (data[i] === 0x00 && data[i + 1] === 0x00 && data[i + 2] === 0x01) {
+        startCodeLen = 3;
+      } else if (
+        i + 4 < data.length &&
+        data[i] === 0x00 &&
+        data[i + 1] === 0x00 &&
+        data[i + 2] === 0x00 &&
+        data[i + 3] === 0x01
+      ) {
+        startCodeLen = 4;
+      }
+      if (!startCodeLen) continue;
+      const nalIndex = i + startCodeLen;
+      if (nalIndex >= data.length) break;
+      if ((data[nalIndex] & 0x1f) === 5) {
+        return true;
+      }
+      i = nalIndex;
+    }
+    return false;
+  }
+
+  function ensureVideoDecoder() {
+    if (videoDecoder) return true;
+    if (typeof VideoDecoder !== "function") return false;
+    try {
+      videoDecoder = new VideoDecoder({
+        output: (frame) => {
+          const width = frame.displayWidth || frame.codedWidth || canvas.width;
+          const height = frame.displayHeight || frame.codedHeight || canvas.height;
+          if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+          try {
+            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+          } finally {
+            frame.close();
+          }
+        },
+        error: (err) => {
+          console.warn("hvnc: h264 decoder error", err);
+        },
+      });
+      videoDecoder.configure({ codec: "avc1.42E01E", optimizeForLatency: true });
+      return true;
+    } catch (err) {
+      console.warn("hvnc: h264 decoder unavailable", err);
+      fallbackToJpegCodec(err);
+      return false;
+    }
   }
 
   displaySelect.addEventListener("change", function () {
@@ -310,6 +430,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 
         if (format === 1) {
           const jpegBytes = buf.slice(8);
+          setCodecModeLabel("jpeg", "active");
           const blob = new Blob([jpegBytes], { type: "image/jpeg" });
           try {
             const bitmap = await createImageBitmap(blob);
@@ -334,6 +455,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
         }
 
         if (format === 2 || format === 3) {
+          setCodecModeLabel(format === 3 ? "raw" : "jpeg", "blocks");
           if (buf.length < 8 + 8) return;
           const dv = new DataView(buf.buffer, 8);
           let pos = 0;
@@ -388,6 +510,31 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
           updateFpsDisplay(fps);
           return;
         }
+
+        if (format === 4) {
+          setCodecModeLabel("h264", "active");
+          const h264Bytes = buf.slice(8);
+          if (!h264Bytes.length) return;
+          if (!ensureVideoDecoder()) {
+            fallbackToJpegCodec("WebCodecs decoder unavailable");
+            return;
+          }
+          const frameIntervalUs = Math.floor(1_000_000 / Math.max(1, fps || 25));
+          const chunk = new EncodedVideoChunk({
+            type: isH264KeyFrame(h264Bytes) ? "key" : "delta",
+            timestamp: h264TimestampUs,
+            data: h264Bytes,
+          });
+          h264TimestampUs += frameIntervalUs;
+          try {
+            videoDecoder.decode(chunk);
+            updateFpsDisplay(fps);
+          } catch (err) {
+            console.warn("hvnc: h264 decode failed", err);
+            fallbackToJpegCodec(err);
+          }
+          return;
+        }
       }
 
       const msg = decodeMsgpack(buf);
@@ -423,10 +570,12 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
 
   ws.addEventListener("close", function () {
     desiredStreaming = false;
+    destroyVideoDecoder();
     setStreamState("disconnected", "Disconnected");
   });
 
   ws.addEventListener("error", function () {
+    destroyVideoDecoder();
     setStreamState("error", "WebSocket error");
   });
 
@@ -551,6 +700,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
       desiredStreaming = false;
       sendCmd("hvnc_stop", {});
     }
+    destroyVideoDecoder();
   }
 
   window.addEventListener("beforeunload", stopOnExit);

@@ -560,6 +560,23 @@ func buildFrameHVNC(img *image.RGBA, display int, quality int) (wire.Frame, time
 	codec := blockCodec()
 
 	now := time.Now()
+	if codec == "h264" {
+		h264Bytes, err := encodeH264Frame(img)
+		if err == nil && len(h264Bytes) > 0 {
+			prevMu.Lock()
+			copyPrev(img)
+			prevMu.Unlock()
+			lastKeyframe.Store(now.UnixNano())
+			statFullFrames.Add(1)
+			frame := wire.Frame{Type: "frame", Header: wire.FrameHeader{Monitor: display, FPS: 0, Format: "h264", HVNC: true}, Data: h264Bytes}
+			return frame, time.Since(encStart), nil
+		}
+		h264WarnOnce.Do(func() {
+			log.Printf("hvnc capture: h264 encode unavailable, falling back to jpeg: %v", err)
+		})
+		codec = "jpeg"
+	}
+
 	prevMu.Lock()
 	pf := prevFrame
 	prevMu.Unlock()
