@@ -216,7 +216,14 @@ func captureAllDisplaysAndSend(ctx context.Context, env *rt.Env) error {
 }
 
 func supportsCapture() bool {
-	return safeDisplayCount() > 0
+	return safeActiveDisplays() > 0
+}
+
+func safeActiveDisplays() int {
+	defer func() {
+		_ = recover()
+	}()
+	return activeDisplays()
 }
 
 func safeCaptureDisplay(display int) (*image.RGBA, error) {
