@@ -166,6 +166,7 @@ export function createRenderer({
     const wasChecked = oldCheckbox?.checked || false;
 
     card.dataset.online = String(!!client.online);
+    card.dataset.os = String(client.os || "").toLowerCase();
     const os = osBadge(client.os || "unknown");
     const arch = archBadge(client.arch || "");
     const ver = versionBadge(client.version || "");

