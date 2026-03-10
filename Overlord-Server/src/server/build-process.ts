@@ -170,7 +170,7 @@ export async function startBuildProcess(
 
     for (const platform of platformsToBuild) {
       const [os, arch, ...rest] = platform.split("-");
-      const goarm = rest[0] === "armv7" ? "7" : undefined;
+      const goarm = arch === "armv7" ? "7" : undefined;
       const actualArch = goarm ? "arm" : arch;
       const outputName = deps.sanitizeOutputName(
         platform.includes("windows") ? `agent-${platform}.exe` : `agent-${platform}`,

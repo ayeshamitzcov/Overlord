@@ -145,6 +145,29 @@ set CGO_ENABLED=0
 %BUILD_CMD% %BUILD_TAGS% -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-freebsd-arm64" ./cmd/agent
 if errorlevel 1 goto :err
 
+echo == Building agent for android arm64 ==
+set GOOS=android
+set GOARCH=arm64
+set CGO_ENABLED=0
+%BUILD_CMD% %BUILD_TAGS% -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-android-arm64" ./cmd/agent
+if errorlevel 1 goto :err
+
+echo == Building agent for android amd64 ==
+set GOOS=android
+set GOARCH=amd64
+set CGO_ENABLED=0
+%BUILD_CMD% %BUILD_TAGS% -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-android-amd64" ./cmd/agent
+if errorlevel 1 goto :err
+
+echo == Building agent for android arm (armv7) ==
+set GOOS=android
+set GOARCH=arm
+set GOARM=7
+set CGO_ENABLED=0
+%BUILD_CMD% %BUILD_TAGS% -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-android-armv7" ./cmd/agent
+if errorlevel 1 goto :err
+set GOARM=
+
 echo == Building agent for openbsd amd64 ==
 set GOOS=openbsd
 set GOARCH=amd64
