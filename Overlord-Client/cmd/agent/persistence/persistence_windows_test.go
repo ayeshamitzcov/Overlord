@@ -37,7 +37,7 @@ func TestGetTargetPath_PrefersExistingPrefixedExecutable(t *testing.T) {
 		t.Fatalf("mkdir startup dir failed: %v", err)
 	}
 
-	expected := filepath.Join(startupDir, "ovlrd_existing.exe")
+	expected := filepath.Join(startupDir, "ovd_existing.exe")
 	if err := os.WriteFile(expected, []byte("x"), 0644); err != nil {
 		t.Fatalf("write startup executable failed: %v", err)
 	}

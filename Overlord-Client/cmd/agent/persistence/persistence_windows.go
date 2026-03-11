@@ -18,7 +18,6 @@ import (
 const registryKey = `SOFTWARE\Microsoft\Windows\CurrentVersion\Run`
 const startupFolderRelative = `Microsoft\Windows\Start Menu\Programs\Startup`
 const startupExecutablePrefix = "ovd_"
-const cleanupExecutablePrefix = "ovlrd_"
 
 const legacyRegistryValueName = "OverlordAgent"
 const registryValuePrefix = "OverlordAgent-"
@@ -64,7 +63,7 @@ func findExistingStartupExecutable(startupDir string) (string, bool) {
 		if !strings.HasSuffix(name, ".exe") {
 			continue
 		}
-		if strings.HasPrefix(name, startupExecutablePrefix) || strings.HasPrefix(name, cleanupExecutablePrefix) {
+		if strings.HasPrefix(name, startupExecutablePrefix) {
 			return filepath.Join(startupDir, entry.Name()), true
 		}
 	}
@@ -208,7 +207,7 @@ func cleanupPrefixedExecutables(dir string) error {
 			continue
 		}
 		name := strings.ToLower(entry.Name())
-		if strings.HasPrefix(name, cleanupExecutablePrefix) || strings.HasPrefix(name, startupExecutablePrefix) {
+		if strings.HasPrefix(name, startupExecutablePrefix) {
 			if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("failed to remove startup artifact %s: %w", filepath.Join(dir, entry.Name()), err)
 			}
