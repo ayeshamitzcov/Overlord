@@ -38,11 +38,11 @@ cl.exe /c %CFLAGS% /Fo"%SRC_DIR%\ReflectiveLoader.obj" "%SRC_DIR%\ReflectiveLoad
 if %ERRORLEVEL% neq 0 goto :error
 
 echo Compiling ReflectiveDll.c ...
-cl.exe /c %CFLAGS% /TP /Fo"%SRC_DIR%\ReflectiveDll.obj" "%SRC_DIR%\ReflectiveDll.c"
+cl.exe /c %CFLAGS% /Fo"%SRC_DIR%\ReflectiveDll.obj" "%SRC_DIR%\ReflectiveDll.c"
 if %ERRORLEVEL% neq 0 goto :error
 
 echo Compiling NtApiHooks.c ...
-cl.exe /c %CFLAGS% /TP /Fo"%SRC_DIR%\NtApiHooks.obj" "%SRC_DIR%\NtApiHooks.c"
+cl.exe /c %CFLAGS% /Fo"%SRC_DIR%\NtApiHooks.obj" "%SRC_DIR%\NtApiHooks.c"
 if %ERRORLEVEL% neq 0 goto :error
 
 echo Linking HVNCInjection.x64.dll ...
