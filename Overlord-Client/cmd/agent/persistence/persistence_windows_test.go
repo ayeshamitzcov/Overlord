@@ -397,7 +397,7 @@ func TestInstallRegistry_UpdatesExistingValue(t *testing.T) {
 }
 
 func TestCleanupOverlordRunValues_RemovesMatchingValues(t *testing.T) {
-	k, err := registry.OpenKey(registry.CURRENT_USER, registryKey,
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, registryKey,
 		registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		t.Fatalf("open registry key: %v", err)

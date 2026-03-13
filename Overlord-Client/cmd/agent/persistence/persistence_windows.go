@@ -157,7 +157,7 @@ func installStartupFolder(_ string) error {
 }
 
 func installRegistry(targetPath string) error {
-	k, err := registry.OpenKey(registry.CURRENT_USER, registryKey,
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, registryKey,
 		registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
 		return fmt.Errorf("failed to open HKCU Run key: %w", err)
