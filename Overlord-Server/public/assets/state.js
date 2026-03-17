@@ -2,7 +2,7 @@ export const state = {
   page: 1,
   pageSize: 12,
   searchTerm: "",
-  sort: "last_seen_desc",
+  sort: "stable",
   filterStatus: "all",
   filterOs: "all",
   filterCountry: "all",

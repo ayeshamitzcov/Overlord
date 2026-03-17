@@ -11,7 +11,7 @@ export function registerRenderer(fn) {
 }
 
 export async function loadWithOptions(options = {}) {
-  const { force = false } = options;
+  const { force = false, reorder = false } = options;
   if (state.isLoading) {
     state.pendingForce = state.pendingForce || force;
     return;
@@ -38,7 +38,7 @@ export async function loadWithOptions(options = {}) {
       return;
     }
     state.lastDigest = digest;
-    render(data);
+    render(data, { reorder });
     
     if (!state.thumbnailsRequested) {
       state.thumbnailsRequested = true;

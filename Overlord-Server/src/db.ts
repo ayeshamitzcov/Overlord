@@ -348,6 +348,8 @@ export function listClients(filters: ListFilters): ListResult {
   const orderBy = (() => {
     const bookmark = "bookmarked DESC";
     switch (sort) {
+      case "stable":
+        return `ORDER BY ${bookmark}, online DESC, id ASC`;
       case "ping_asc":
         return `ORDER BY ${bookmark}, ping_ms IS NULL, ping_ms ASC, id ASC`;
       case "ping_desc":

@@ -33,7 +33,8 @@ export function createRenderer({
   const TOUCH_MOVE_CANCEL_PX = 10;
   let renderToken = 0;
 
-  function renderMerge(data) {
+  function renderMerge(data, options = {}) {
+    const { reorder = false } = options;
     totalPill.textContent = `${data.online ?? data.total} online / ${data.total} total`;
     const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize));
     pageLabel.textContent = `Page ${data.page} of ${totalPages}`;
@@ -47,8 +48,8 @@ export function createRenderer({
       typeof window !== "undefined" &&
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const animateLimit = Math.min(items.length, MAX_ANIMATED_CARDS);
-    const allowAnimation = !prefersReducedMotion && items.length <= 1000;
+
+    const hadCards = grid.querySelectorAll("article[data-id]").length > 0;
 
     items.forEach((client) => {
       seen.add(client.id);
@@ -64,10 +65,19 @@ export function createRenderer({
       .filter((el) => !seen.has(el.dataset.id))
       .forEach((el) => el.remove());
 
+    if (reorder) {
+      items.forEach((client) => {
+        const card = grid.querySelector(`article[data-id="${client.id}"]`);
+        if (card) grid.appendChild(card);
+      });
+    }
+
     if (newClients.length === 0) {
-      moveOfflineToBottom();
       return;
     }
+
+    const allowAnimation = !hadCards && !prefersReducedMotion && items.length <= 1000;
+    const animateLimit = Math.min(newClients.length, MAX_ANIMATED_CARDS);
 
     let idx = 0;
     const insertBatch = () => {
@@ -91,33 +101,9 @@ export function createRenderer({
         requestAnimationFrame(insertBatch);
         return;
       }
-
-      moveOfflineToBottom();
     };
 
     insertBatch();
-  }
-
-  function moveOfflineToBottom() {
-    const cards = Array.from(grid.querySelectorAll("article[data-id]"));
-    if (cards.length === 0) return;
-
-    const online = [];
-    const offline = [];
-    cards.forEach((card) => {
-      if (card.dataset.online === "true") {
-        online.push(card);
-        return;
-      }
-      offline.push(card);
-    });
-
-    if (offline.length === 0) return;
-
-    const fragment = document.createDocumentFragment();
-    online.forEach((card) => fragment.appendChild(card));
-    offline.forEach((card) => fragment.appendChild(card));
-    grid.appendChild(fragment);
   }
 
   function prevBtnState(currentPage, totalPages) {

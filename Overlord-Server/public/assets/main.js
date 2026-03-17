@@ -411,7 +411,7 @@ wireModalClose();
 const debouncedSearch = debounce(() => {
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 }, 200);
 
 searchInput?.addEventListener("input", (e) => {
@@ -423,7 +423,7 @@ sortSelect?.addEventListener("change", (e) => {
   state.sort = e.target.value;
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 filterStatusSelect?.addEventListener("change", (e) => {
@@ -436,21 +436,21 @@ filterStatusSelect?.addEventListener("change", (e) => {
   }
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 filterOsSelect?.addEventListener("change", (e) => {
   state.filterOs = e.target.value;
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 initCountryPicker((code) => {
   state.filterCountry = code;
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 showOfflineToggle?.addEventListener("change", (e) => {
@@ -467,7 +467,7 @@ showOfflineToggle?.addEventListener("change", (e) => {
   }
   state.page = 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 function updateBulkToolbar() {
@@ -686,14 +686,14 @@ prevBtn?.addEventListener("click", () => {
   if (state.page > 1) {
     state.page -= 1;
     state.lastDigest = "";
-    loadWithOptions({ force: true });
+    loadWithOptions({ force: true, reorder: true });
   }
 });
 
 nextBtn?.addEventListener("click", () => {
   state.page += 1;
   state.lastDigest = "";
-  loadWithOptions({ force: true });
+  loadWithOptions({ force: true, reorder: true });
 });
 
 window.addEventListener("click", (e) => {
