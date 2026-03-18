@@ -66,6 +66,12 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
   const agentFps = document.getElementById("agentFps");
   const viewerFps = document.getElementById("viewerFps");
   const statusEl = document.getElementById("streamStatus");
+
+  function syncInputEnableState() {
+    if (mouseCtrl) sendCmd("hvnc_enable_mouse", { enabled: mouseCtrl.checked });
+    if (kbdCtrl) sendCmd("hvnc_enable_keyboard", { enabled: kbdCtrl.checked });
+    if (cursorCtrl) sendCmd("hvnc_enable_cursor", { enabled: cursorCtrl.checked });
+  }
   let activeClientId = clientId;
   let renderCount = 0;
   let renderWindowStart = performance.now();
@@ -232,6 +238,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
         sendCmd("hvnc_start", {
           autoStartExplorer: false,
         });
+        syncInputEnableState();
       } else {
         setStreamState("idle", "Stopped");
       }
@@ -475,6 +482,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
     sendCmd("hvnc_start", {
       autoStartExplorer: false,
     });
+    syncInputEnableState();
   });
   stopBtn.addEventListener("click", function () {
     desiredStreaming = false;
@@ -673,6 +681,7 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
         sendCmd("hvnc_select_display", { display: parseInt(displaySelect.value, 10) || 0 });
       }
       sendCmd("hvnc_start", { autoStartExplorer: false });
+      syncInputEnableState();
     } else {
       setStreamState("idle", "Stopped");
     }

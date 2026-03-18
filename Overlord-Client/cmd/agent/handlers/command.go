@@ -1356,7 +1356,7 @@ func HandleCommand(ctx context.Context, env *runtime.Env, envelope map[string]in
 		exePath := ""
 		clone := true
 		cloneLite := false
-		killIfRunning := true
+		killIfRunning := false
 		if payload != nil {
 			if v, ok := payload["browser"].(string); ok {
 				browser = v

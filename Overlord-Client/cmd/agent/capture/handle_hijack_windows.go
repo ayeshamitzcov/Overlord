@@ -3,12 +3,34 @@
 package capture
 
 import (
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 )
+
+func copyFileCount(src, dst string) (int64, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return 0, err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return 0, err
+	}
+	defer out.Close()
+
+	n, err := io.Copy(out, in)
+	return n, err
+}
 
 var (
 	ntdll                         = syscall.NewLazyDLL("ntdll.dll")
