@@ -339,29 +339,55 @@
                       >
                     </div>
                   </label>
-                  <!-- Persistence method selector – Windows only, shown when persistence is enabled -->
                   <div
                     id="persistence-method-container"
-                    class="hidden pl-3 border-l-2 border-orange-500/40"
+                    class="hidden pl-3 border-l-2 border-orange-500/40 space-y-3"
                   >
-                    <label
-                      class="block text-xs font-medium text-slate-400 mb-1"
-                      for="persistence-method"
-                      >Windows Persistence Method</label
-                    >
-                    <select
-                      id="persistence-method"
-                      name="persistence-method"
-                      class="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-orange-500 transition-colors"
-                    >
-                      <option value="startup">Startup Folder (APPDATA)</option>
-                      <option value="registry">Registry (HKCU Run key)</option>
-                      <option value="taskscheduler">Task Scheduler (ONLOGON, requires admin)</option>
-                      <option value="wmi">WMI Subscription (requires admin)</option>
-                    </select>
-                    <p class="text-xs text-slate-500 mt-1">
-                      Method used on Windows; other platforms use their native mechanism
-                    </p>
+                    <div id="persistence-empty-state" class="hidden text-xs text-slate-500">
+                      No supported persistence targets selected. Select Windows, Linux, or macOS targets to configure persistence.
+                    </div>
+
+                    <div id="persistence-windows-settings" class="hidden" data-persistence-os="windows">
+                      <div class="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                        <i class="fa-brands fa-windows text-blue-400"></i>
+                        Windows Persistence Settings
+                      </div>
+                      <label
+                        class="block text-xs font-medium text-slate-400 mb-1"
+                        for="persistence-method"
+                        >Persistence Method</label
+                      >
+                      <select
+                        id="persistence-method"
+                        name="persistence-method"
+                        class="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-orange-500 transition-colors"
+                      >
+                        <option value="startup">Startup Folder (APPDATA)</option>
+                        <option value="registry">Registry (HKCU Run key)</option>
+                        <option value="taskscheduler">Task Scheduler (ONLOGON, requires admin)</option>
+                        <option value="wmi">WMI Subscription (requires admin)</option>
+                      </select>
+                    </div>
+
+                    <div id="persistence-linux-settings" class="hidden" data-persistence-os="linux">
+                      <div class="text-xs font-semibold text-slate-300 mb-1 flex items-center gap-2">
+                        <i class="fa-brands fa-linux text-amber-400"></i>
+                        Linux Persistence Settings
+                      </div>
+                      <p class="text-xs text-slate-500">
+                        Uses user-level <code>systemd</code> service when available; falls back to desktop autostart.
+                      </p>
+                    </div>
+
+                    <div id="persistence-macos-settings" class="hidden" data-persistence-os="darwin">
+                      <div class="text-xs font-semibold text-slate-300 mb-1 flex items-center gap-2">
+                        <i class="fa-brands fa-apple text-slate-200"></i>
+                        macOS Persistence Settings
+                      </div>
+                      <p class="text-xs text-slate-500">
+                        Uses <code>LaunchAgents</code> (<code>com.overlord.agent.plist</code>) for login persistence.
+                      </p>
+                    </div>
                   </div>
                   <label
                     class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-emerald-500 transition-colors"

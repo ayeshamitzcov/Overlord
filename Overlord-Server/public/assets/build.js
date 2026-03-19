@@ -81,15 +81,61 @@ if (rawServerListCheckbox && serverUrlInput) {
 
 const persistenceCheckbox = document.querySelector('input[name="enable-persistence"]');
 const persistenceMethodContainer = document.getElementById("persistence-method-container");
-if (persistenceCheckbox && persistenceMethodContainer) {
-  persistenceCheckbox.addEventListener("change", () => {
-    if (persistenceCheckbox.checked) {
-      persistenceMethodContainer.classList.remove("hidden");
-    } else {
-      persistenceMethodContainer.classList.add("hidden");
-    }
-  });
+const persistenceEmptyState = document.getElementById("persistence-empty-state");
+const persistenceWindowsSettings = document.getElementById("persistence-windows-settings");
+const persistenceLinuxSettings = document.getElementById("persistence-linux-settings");
+const persistenceMacSettings = document.getElementById("persistence-macos-settings");
+const platformInputs = document.querySelectorAll('input[name="platform"]');
+
+function getSelectedPlatformFamilies() {
+  const selectedPlatforms = Array.from(
+    document.querySelectorAll('input[name="platform"]:checked'),
+  ).map((el) => el.value);
+
+  return {
+    windows: selectedPlatforms.some((platform) => platform.startsWith("windows-")),
+    linux: selectedPlatforms.some((platform) => platform.startsWith("linux-")),
+    darwin: selectedPlatforms.some((platform) => platform.startsWith("darwin-")),
+  };
 }
+
+function updatePersistenceSettingsVisibility() {
+  if (!persistenceMethodContainer) return;
+
+  const persistenceEnabled = !!persistenceCheckbox?.checked;
+  if (!persistenceEnabled) {
+    persistenceMethodContainer.classList.add("hidden");
+    return;
+  }
+
+  persistenceMethodContainer.classList.remove("hidden");
+
+  const families = getSelectedPlatformFamilies();
+  const hasSupportedFamily = families.windows || families.linux || families.darwin;
+
+  if (persistenceWindowsSettings) {
+    persistenceWindowsSettings.classList.toggle("hidden", !families.windows);
+  }
+  if (persistenceLinuxSettings) {
+    persistenceLinuxSettings.classList.toggle("hidden", !families.linux);
+  }
+  if (persistenceMacSettings) {
+    persistenceMacSettings.classList.toggle("hidden", !families.darwin);
+  }
+  if (persistenceEmptyState) {
+    persistenceEmptyState.classList.toggle("hidden", hasSupportedFamily);
+  }
+}
+
+if (persistenceCheckbox && persistenceMethodContainer) {
+  persistenceCheckbox.addEventListener("change", updatePersistenceSettingsVisibility);
+}
+
+platformInputs.forEach((input) => {
+  input.addEventListener("change", updatePersistenceSettingsVisibility);
+});
+
+updatePersistenceSettingsVisibility();
 
 const obfuscateCheckbox = document.querySelector('input[name="obfuscate"]');
 const garbleSettingsContainer = document.getElementById("garble-settings-container");
@@ -265,7 +311,10 @@ form?.addEventListener("submit", async (e) => {
   const enablePersistence = form.querySelector(
     'input[name="enable-persistence"]',
   ).checked;
-  const persistenceMethod = form.querySelector('#persistence-method')?.value || 'startup';
+  const hasWindowsTarget = platforms.some((platform) => platform.startsWith("windows-"));
+  const persistenceMethod = hasWindowsTarget
+    ? form.querySelector("#persistence-method")?.value || "startup"
+    : undefined;
   const hideConsole = form.querySelector(
     'input[name="hide-console"]',
   ).checked;
@@ -293,7 +342,7 @@ form?.addEventListener("submit", async (e) => {
     disableCgo,
     obfuscate,
     enablePersistence,
-    persistenceMethod: enablePersistence ? persistenceMethod : undefined,
+    persistenceMethod: enablePersistence && hasWindowsTarget ? persistenceMethod : undefined,
     hideConsole,
     noPrinting,
     outputName: outputNameVal || undefined,
