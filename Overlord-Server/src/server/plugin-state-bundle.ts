@@ -92,10 +92,6 @@ export async function ensurePluginExtracted(
     }
   }
 
-  const hasNative = nativeBinaries.size > 0;
-  if (!hasNative) {
-    throw new Error(`Invalid plugin bundle: ${safeId} (no native binaries found)`);
-  }
   if (!htmlEntry || !cssEntry || !jsEntry) {
     throw new Error(`Invalid plugin bundle: ${safeId} (missing .html, .css, or .js)`);
   }
@@ -183,7 +179,7 @@ export async function loadPluginBundle(
   ensureExtracted: (pluginId: string) => Promise<void>,
   clientOS?: string,
   clientArch?: string,
-): Promise<{ manifest: PluginManifest; binary: Uint8Array }> {
+): Promise<{ manifest: PluginManifest; binary: Uint8Array | null }> {
   await ensureExtracted(pluginId);
   const dir = path.join(pluginRoot, pluginId);
   const manifestPath = path.join(dir, "manifest.json");
@@ -191,6 +187,11 @@ export async function loadPluginBundle(
   const manifest = JSON.parse(rawManifest) as PluginManifest;
   manifest.id = manifest.id || pluginId;
   manifest.name = manifest.name || pluginId;
+
+  const hasBinaries = manifest.binaries && Object.keys(manifest.binaries).length > 0;
+  if (!hasBinaries) {
+    return { manifest, binary: null };
+  }
 
   let binaryPath: string | null = null;
 
@@ -224,8 +225,9 @@ export async function loadPluginBundle(
 
 export function sendPluginBundle(
   target: ClientInfo,
-  bundle: { manifest: PluginManifest; binary: Uint8Array },
+  bundle: { manifest: PluginManifest; binary: Uint8Array | null },
 ): void {
+  if (!bundle.binary) return;
   const chunkSize = 16 * 1024;
   const data = bundle.binary;
   const totalChunks = Math.ceil(data.length / chunkSize);

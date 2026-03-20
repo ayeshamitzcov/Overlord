@@ -14,7 +14,7 @@ type PluginManifest = {
 
 type PluginBundle = {
   manifest: PluginManifest;
-  binary: Uint8Array;
+  binary: Uint8Array | null;
 };
 
 type PluginState = {
