@@ -75,8 +75,9 @@ export async function handleClientRoutes(
     const statusFilter = url.searchParams.get("status") || "all";
     const osFilter = url.searchParams.get("os") || "all";
     const countryFilter = url.searchParams.get("country") || "all";
+    const enrollmentFilter = url.searchParams.get("enrollmentFilter") || "all";
     if (user.role === "admin") {
-      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter });
+      const result = listClients({ page, pageSize, search, sort, statusFilter, osFilter, countryFilter, enrollmentFilter });
       return Response.json(result, { headers: deps.CORS_HEADERS });
     }
 
@@ -105,6 +106,7 @@ export async function handleClientRoutes(
       statusFilter,
       osFilter,
       countryFilter,
+      enrollmentFilter,
       allowedClientIds,
       deniedClientIds,
     });

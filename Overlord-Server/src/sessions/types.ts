@@ -22,6 +22,7 @@ export type SocketData = {
   userId?: number;
   wasKnown?: boolean;
   autoTasksRan?: boolean;
+  enrollmentNonce?: string;
 };
 
 export type ConsoleSession = {

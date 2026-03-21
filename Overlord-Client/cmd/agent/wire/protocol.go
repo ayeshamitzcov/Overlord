@@ -13,6 +13,18 @@ type Hello struct {
 	MonitorInfo []MonitorInfo `msgpack:"monitorInfo,omitempty"`
 	Country     string        `msgpack:"country,omitempty"`
 	BuildTag    string        `msgpack:"buildTag,omitempty"`
+	PublicKey   string        `msgpack:"publicKey,omitempty"`
+	Signature   string        `msgpack:"signature,omitempty"`
+}
+
+type EnrollmentChallenge struct {
+	Type  string `msgpack:"type"`
+	Nonce string `msgpack:"nonce"`
+}
+
+type EnrollmentStatus struct {
+	Type   string `msgpack:"type"`
+	Status string `msgpack:"status"`
 }
 
 type MonitorInfo struct {

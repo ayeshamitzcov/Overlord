@@ -32,5 +32,8 @@
     "telegramEnabled": false,
     "telegramBotToken": "",
     "telegramChatId": ""
+  },
+  "enrollment": {
+    "requireApproval": true
   }
 }

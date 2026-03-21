@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -133,6 +134,12 @@ func runClient(cfg config.Config) {
 		if sessionErr != nil && shouldRetryImmediately(sessionErr) {
 			sleepFor = reconnectDelay()
 			log.Printf("reconnect: immediate retry in %s", sleepFor)
+		}
+		if sessionErr != nil {
+			if d := enrollmentRetryDelay(sessionErr); d > 0 {
+				sleepFor = d
+				log.Printf("purgatory: retry in %s", sleepFor)
+			}
 		}
 		time.Sleep(sleepFor)
 	}
@@ -304,6 +311,9 @@ func shouldRetryImmediately(err error) bool {
 	}
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
+		if closeErr.Code == 4001 || closeErr.Code == 4002 || closeErr.Code == 4003 {
+			return false
+		}
 		if closeErr.Code == websocket.StatusNormalClosure || closeErr.Code == websocket.StatusGoingAway {
 			return true
 		}
@@ -319,6 +329,43 @@ func shouldRetryImmediately(err error) bool {
 		return true
 	}
 	return false
+}
+
+func enrollmentRetryDelay(err error) time.Duration {
+	if err == nil {
+		return 0
+	}
+
+	msg := err.Error()
+	if strings.Contains(msg, "purgatory: status=pending") {
+		return getEnrollmentRetryInterval()
+	}
+	if strings.Contains(msg, "purgatory: status=denied") {
+		return 5 * time.Minute
+	}
+
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		switch closeErr.Code {
+		case 4001: // pending
+			return getEnrollmentRetryInterval()
+		case 4002: // invalid signature
+			return 60 * time.Second
+		case 4003: // denied
+			return 5 * time.Minute
+		}
+	}
+	return 0
+}
+
+func getEnrollmentRetryInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("OVERLORD_ENROLLMENT_RETRY_MS"))
+	if raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return 30 * time.Second
 }
 
 func getPingInterval() time.Duration {
@@ -350,7 +397,50 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 	defer cancel()
 	defer conn.Close(websocket.StatusNormalClosure, "bye")
 
+	identity := config.DeriveIdentity()
+	log.Printf("[purgatory] identity fingerprint=%s", identity.Fingerprint)
+
+	challengeCtx, challengeCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer challengeCancel()
+
+	_, challengeData, err := conn.Read(challengeCtx)
+	if err != nil {
+		return fmt.Errorf("purgatory: failed to read challenge: %w", err)
+	}
+	challengeEnvelope, err := wire.DecodeEnvelope(challengeData)
+	if err != nil {
+		return fmt.Errorf("purgatory: failed to decode challenge: %w", err)
+	}
+
 	safeWriter := wire.NewSafeWriter(conn)
+
+	msgType, _ := challengeEnvelope["type"].(string)
+	var publicKeyB64, signatureB64 string
+
+	switch msgType {
+	case "enrollment_challenge":
+		nonceB64, _ := challengeEnvelope["nonce"].(string)
+		if nonceB64 == "" {
+			return fmt.Errorf("purgatory: empty nonce in challenge")
+		}
+		nonceBytes, decErr := base64.StdEncoding.DecodeString(nonceB64)
+		if decErr != nil {
+			return fmt.Errorf("purgatory: invalid nonce base64: %w", decErr)
+		}
+		sig := identity.Sign(nonceBytes)
+		publicKeyB64 = identity.PublicKeyBase64()
+		signatureB64 = base64.StdEncoding.EncodeToString(sig)
+		log.Printf("[purgatory] signed challenge nonce (%d bytes)", len(nonceBytes))
+
+	case "hello_ack":
+		log.Printf("[purgatory] legacy server (no challenge), proceeding")
+		publicKeyB64 = ""
+		signatureB64 = ""
+
+	default:
+		return fmt.Errorf("purgatory: unexpected first message type: %s", msgType)
+	}
+
 	env := &rt.Env{Conn: safeWriter, Cfg: cfg, Cancel: cancel, SelectedDisplay: handlers.GetPersistedDisplay()}
 	env.SetLastPong(time.Now().UnixMilli())
 	env.Console = rt.NewConsoleHub(env)
@@ -389,10 +479,43 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 		MonitorInfo: toWireMonitorInfo(capture.MonitorInfos()),
 		Country:     cfg.Country,
 		BuildTag:    cfg.BuildTag,
+		PublicKey:   publicKeyB64,
+		Signature:   signatureB64,
 	}
 
 	if err := wire.WriteMsg(ctx, env.Conn, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
+	}
+
+	if msgType == "enrollment_challenge" {
+		ackCtx, ackCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer ackCancel()
+
+		for {
+			_, ackData, err := conn.Read(ackCtx)
+			if err != nil {
+				return fmt.Errorf("purgatory: failed to read response: %w", err)
+			}
+			ackEnvelope, err := wire.DecodeEnvelope(ackData)
+			if err != nil {
+				return fmt.Errorf("purgatory: failed to decode response: %w", err)
+			}
+
+			ackType, _ := ackEnvelope["type"].(string)
+			switch ackType {
+			case "hello_ack":
+				log.Printf("[purgatory] approved, proceeding with session")
+			case "enrollment_status":
+				status, _ := ackEnvelope["status"].(string)
+				log.Printf("[purgatory] server returned status=%s", status)
+				return fmt.Errorf("purgatory: status=%s", status)
+			case "ping", "pong":
+				continue
+			default:
+				return fmt.Errorf("purgatory: unexpected response type: %s", ackType)
+			}
+			break
+		}
 	}
 
 	if err := wire.WriteMsg(ctx, env.Conn, wire.Ping{Type: "ping", TS: time.Now().UnixMilli()}); err != nil {

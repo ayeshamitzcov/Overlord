@@ -1,6 +1,6 @@
 module overlord-client
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/creack/pty v1.1.21
@@ -14,7 +14,8 @@ require (
 require (
 	github.com/Kirizu-Official/windows-camera-go v0.2.0
 	github.com/gen2brain/malgo v0.11.24
-	golang.org/x/sys v0.24.0
+	golang.org/x/crypto v0.49.0
+	golang.org/x/sys v0.42.0
 )
 
 require (

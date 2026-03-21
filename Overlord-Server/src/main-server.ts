@@ -17,6 +17,7 @@ import { metrics } from "./metrics";
 import { ensureDataDir } from "./paths";
 import { handleAuthRoutes } from "./server/routes/auth-routes";
 import { handleAutoScriptsRoutes } from "./server/routes/auto-scripts-routes";
+import { handleEnrollmentRoutes } from "./server/routes/enrollment-routes";
 import { handleBuildRoutes } from "./server/routes/build-routes";
 import { handleAssetsRoutes } from "./server/routes/assets-routes";
 import { handleDeployRoutes } from "./server/routes/deploy-routes";
@@ -482,6 +483,7 @@ async function startServer() {
       handleAuthRoutes,
       handleNotificationsConfigRoutes,
       handleAutoScriptsRoutes,
+      handleEnrollmentRoutes,
       handleUsersRoutes,
       handleBuildRoutes,
       handleDeployRoutes,

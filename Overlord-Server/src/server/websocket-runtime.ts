@@ -10,7 +10,7 @@ type MessageHandler<TLifecycleDeps> = (
   ws: ServerWebSocket<SocketData>,
   message: string | ArrayBuffer | Uint8Array,
   deps: TLifecycleDeps,
-) => void;
+) => void | Promise<void>;
 
 type CloseHandler<TLifecycleDeps> = (
   ws: ServerWebSocket<SocketData>,

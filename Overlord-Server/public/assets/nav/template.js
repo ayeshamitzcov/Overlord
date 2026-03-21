@@ -77,6 +77,12 @@ export function mountNav(host) {
           class="hidden inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-colors"
           ><i class="fa-solid fa-users text-indigo-400"></i> Users</a
         >
+        <a
+          href="/purgatory"
+          id="enrollment-link"
+          class="hidden inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-900/70 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-colors"
+          ><i class="fa-solid fa-user-clock text-amber-400"></i> Purgatory<span id="enrollment-badge" class="hidden min-w-[20px] h-5 px-1 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center"></span></a
+        >
       </nav>
       <div id="nav-utility" class="flex flex-wrap items-center gap-2 md:w-auto md:justify-end md:shrink-0">
         <button
@@ -135,5 +141,7 @@ export function mountNav(host) {
     scriptsLink: document.getElementById("scripts-link"),
     logsLink: document.getElementById("logs-link"),
     notificationsLink: document.getElementById("notifications-link"),
+    enrollmentLink: document.getElementById("enrollment-link"),
+    enrollmentBadge: document.getElementById("enrollment-badge"),
   };
 }

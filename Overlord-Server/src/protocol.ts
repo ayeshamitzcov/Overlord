@@ -13,7 +13,9 @@ export type MessageKind =
   | "plugin_event"
   | "notification"
   | "webcam_devices"
-  | "notification_config";
+  | "notification_config"
+  | "enrollment_challenge"
+  | "enrollment_status";
 
 export type Hello = {
   type: "hello";
@@ -26,6 +28,18 @@ export type Hello = {
   monitors: number;
   monitorInfo?: { width: number; height: number }[];
   country?: string;
+  publicKey?: string;
+  signature?: string;
+};
+
+export type EnrollmentChallenge = {
+  type: "enrollment_challenge";
+  nonce: string;
+};
+
+export type EnrollmentStatusMsg = {
+  type: "enrollment_status";
+  status: "pending" | "approved" | "denied";
 };
 
 export type HelloAck = {
@@ -296,7 +310,9 @@ export type WireMessage =
   | ScriptResult
   | PluginEvent
   | NotificationEvent
-  | NotificationConfig;
+  | NotificationConfig
+  | EnrollmentChallenge
+  | EnrollmentStatusMsg;
 
 export function encodeMessage(msg: WireMessage): Uint8Array {
   return encode(msg);

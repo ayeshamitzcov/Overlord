@@ -52,6 +52,9 @@ export interface Config {
     passwordRequireNumber: boolean;
     passwordRequireSymbol: boolean;
   };
+  enrollment: {
+    requireApproval: boolean;
+  };
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -101,6 +104,9 @@ const DEFAULT_CONFIG: Config = {
     passwordRequireLowercase: false,
     passwordRequireNumber: false,
     passwordRequireSymbol: false,
+  },
+  enrollment: {
+    requireApproval: true,
   },
 };
 
@@ -411,6 +417,12 @@ export function loadConfig(): Config {
         fileConfig.security?.passwordRequireSymbol ||
         DEFAULT_CONFIG.security.passwordRequireSymbol,
     },
+    enrollment: {
+      requireApproval:
+        process.env.OVERLORD_ENROLLMENT_REQUIRE_APPROVAL !== undefined
+          ? String(process.env.OVERLORD_ENROLLMENT_REQUIRE_APPROVAL).toLowerCase() === "true"
+          : (fileConfig.enrollment?.requireApproval ?? DEFAULT_CONFIG.enrollment.requireApproval),
+    },
   };
 
   if (saveChanged) {
@@ -509,6 +521,27 @@ export async function updateSecurityConfig(
 
   fileConfig.security = next;
 
+  await writePersistentFileConfig(fileConfig);
+  return next;
+}
+
+export async function updateEnrollmentConfig(
+  updates: Partial<Config["enrollment"]>,
+): Promise<Config["enrollment"]> {
+  const current = getConfig();
+  const next = {
+    ...current.enrollment,
+    ...updates,
+    requireApproval: updates.requireApproval !== undefined ? Boolean(updates.requireApproval) : current.enrollment.requireApproval,
+  };
+
+  configCache = {
+    ...current,
+    enrollment: next,
+  };
+
+  const fileConfig = readFileConfigForUpdate();
+  fileConfig.enrollment = next;
   await writePersistentFileConfig(fileConfig);
   return next;
 }

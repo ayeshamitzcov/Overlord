@@ -8,6 +8,7 @@ export function applyUserRoleUI(user, refs) {
     scriptsLink,
     logsLink,
     notificationsLink,
+    enrollmentLink,
   } = refs;
 
   if (!user || !usernameDisplay || !roleBadge) return;
@@ -70,6 +71,7 @@ export function applyUserRoleUI(user, refs) {
   if (user.role === "admin" || user.role === "operator") {
     buildLink?.classList.remove("hidden");
     notificationsLink?.classList.remove("hidden");
+    enrollmentLink?.classList.remove("hidden");
   }
   if (user.role !== "viewer") {
     scriptsLink?.classList.remove("hidden");

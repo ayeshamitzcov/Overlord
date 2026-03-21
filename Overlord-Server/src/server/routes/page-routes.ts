@@ -75,6 +75,7 @@ const STATIC_PAGES: StaticPageDef[] = [
   { path: "/scripts",            file: "scripts.html",             access: "no-viewer" },
   { path: "/deploy",             file: "deploy.html",              access: "admin" },
   { path: "/socks5-manager",     file: "socks5-manager.html",      access: "no-viewer",        checkPasswordChange: true },
+  { path: "/purgatory",          file: "purgatory.html",           access: "admin-or-operator", checkPasswordChange: true },
 ];
 
 /** Client-scoped pages accessed via query param ?clientId=... */

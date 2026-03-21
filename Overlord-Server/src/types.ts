@@ -1,5 +1,7 @@
 export type ClientRole = "client" | "viewer";
 
+export type EnrollmentStatus = "pending" | "approved" | "denied";
+
 export type ClientInfo = {
   id: string;
   lastSeen: number;
@@ -22,6 +24,9 @@ export type ClientInfo = {
   monitorInfo?: { width: number; height: number }[];
   country?: string;
   pingMs?: number;
+  enrollmentStatus?: EnrollmentStatus;
+  publicKey?: string;
+  keyFingerprint?: string;
 };
 
 export type ListFilters = {
@@ -32,6 +37,7 @@ export type ListFilters = {
   statusFilter?: string;
   osFilter?: string;
   countryFilter?: string;
+  enrollmentFilter?: string;
   allowedClientIds?: string[];
   deniedClientIds?: string[];
 };

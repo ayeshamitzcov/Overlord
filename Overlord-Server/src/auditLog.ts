@@ -72,6 +72,10 @@ export enum AuditAction {
   AGENT_UPDATE = "agent_update",
   SCRIPT_EXECUTE = "script_execute",
   SILENT_EXECUTE = "silent_execute",
+  ENROLLMENT_APPROVE = "enrollment_approve",
+  ENROLLMENT_DENY = "enrollment_deny",
+  ENROLLMENT_SETTINGS = "enrollment_settings",
+  ENROLLMENT_BULK = "enrollment_bulk",
 }
 
 export interface AuditLogEntry {
