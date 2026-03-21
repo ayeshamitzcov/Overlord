@@ -7,11 +7,14 @@ import {
   type User,
   type UserRole,
 } from "./users";
+import {
+  persistRevokedToken,
+  isTokenRevoked,
+  pruneExpiredRevokedTokens,
+} from "./db";
 
 const JWT_ISSUER = "overlord-server";
 const JWT_AUDIENCE = "overlord-client";
-
-const tokenBlacklist = new Set<string>();
 
 const tokenCache = new Map<
   string,
@@ -67,7 +70,7 @@ export async function generateToken(user: User): Promise<string> {
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
-  if (tokenBlacklist.has(token)) {
+  if (isTokenRevoked(token)) {
     return null;
   }
 
@@ -106,31 +109,22 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
 }
 
 export function revokeToken(token: string): void {
-  tokenBlacklist.add(token);
+  let expiresAt = Math.floor(Date.now() / 1000) + getSessionTtlSeconds();
+  try {
+    const parts = token.split(".");
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+      if (typeof payload.exp === "number") expiresAt = payload.exp;
+    }
+  } catch { /* keep fallback */ }
+
+  persistRevokedToken(token, expiresAt);
   tokenCache.delete(token);
-  console.log("[auth] Token revoked");
+  console.log("[auth] Token revoked (persisted)");
 }
 
 export async function cleanupBlacklist(): Promise<void> {
-  const now = Math.floor(Date.now() / 1000);
-  let cleaned = 0;
-
-  for (const token of tokenBlacklist) {
-    try {
-      const { payload } = await jwtVerify(token, getSecretKey(), {
-        issuer: JWT_ISSUER,
-        audience: JWT_AUDIENCE,
-      });
-
-      if (payload.exp && payload.exp < now) {
-        tokenBlacklist.delete(token);
-        cleaned++;
-      }
-    } catch {
-      tokenBlacklist.delete(token);
-      cleaned++;
-    }
-  }
+  const pruned = pruneExpiredRevokedTokens();
 
   const cacheNow = Date.now();
   let cacheCleared = 0;
@@ -141,9 +135,9 @@ export async function cleanupBlacklist(): Promise<void> {
     }
   }
 
-  if (cleaned > 0 || cacheCleared > 0) {
+  if (pruned > 0 || cacheCleared > 0) {
     console.log(
-      `[auth] Cleaned up ${cleaned} expired tokens from blacklist, ${cacheCleared} from cache`,
+      `[auth] Cleaned up ${pruned} expired tokens from blacklist, ${cacheCleared} from cache`,
     );
   }
 }

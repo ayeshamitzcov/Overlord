@@ -1,4 +1,12 @@
 import { logger } from "../logger";
+import { timingSafeEqual } from "crypto";
+
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export function isAuthorizedAgentRequest(
   req: Request,
@@ -21,7 +29,9 @@ export function isAuthorizedAgentRequest(
 
   const headerToken = req.headers.get("x-agent-token");
   const queryToken = url.searchParams.get("token");
-  const isAuthed = headerToken === token || queryToken === token;
+  const isAuthed =
+    (headerToken !== null && safeCompare(headerToken, token)) ||
+    (queryToken !== null && safeCompare(queryToken, token));
 
   if (!isAuthed) {
     logger.info("[auth] Agent auth failed");
