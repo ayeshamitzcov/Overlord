@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/draw"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	rt "overlord-client/cmd/agent/runtime"
@@ -97,6 +99,14 @@ func CaptureAndSend(ctx context.Context, env *rt.Env) error {
 	}
 	t0 := time.Now()
 	img, err := safeCaptureDisplay(display)
+	if err != nil {
+		img, err = safeCaptureDisplay(display)
+		if err != nil && errors.Is(err, syscall.EINVAL) {
+			ResetDesktopCapture()
+			ResetMonitorCache()
+			img, err = safeCaptureDisplay(display)
+		}
+	}
 	if err != nil {
 		log.Printf("capture: capture failed: %v (sending black frame)", err)
 		return sendBlackFrame(ctx, env)
