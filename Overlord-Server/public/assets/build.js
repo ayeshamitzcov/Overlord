@@ -105,7 +105,7 @@ function saveFormSettings() {
       upxStripHeaders: document.querySelector('input[name="upx-strip-headers"]')?.checked ?? false,
       sleepSeconds: document.getElementById("sleep-seconds")?.value ?? "0",
       enablePersistence: document.querySelector('input[name="enable-persistence"]')?.checked ?? false,
-      persistenceMethod: document.getElementById("persistence-method")?.value ?? "startup",
+      persistenceMethods: Array.from(document.querySelectorAll('input[name="persistence-method"]:checked')).map((el) => el.value),
       startupName: document.getElementById("startup-name")?.value ?? "",
       hideConsole: document.querySelector('input[name="hide-console"]')?.checked ?? false,
       requireAdmin: document.querySelector('input[name="require-admin"]')?.checked ?? false,
@@ -153,7 +153,11 @@ function restoreFormSettings() {
     if (s.upxStripHeaders !== undefined) setCb('input[name="upx-strip-headers"]', s.upxStripHeaders);
     if (s.sleepSeconds !== undefined) setVal("sleep-seconds", s.sleepSeconds);
     if (s.enablePersistence !== undefined) setCb('input[name="enable-persistence"]', s.enablePersistence);
-    if (s.persistenceMethod !== undefined) setVal("persistence-method", s.persistenceMethod);
+    if (Array.isArray(s.persistenceMethods)) {
+      document.querySelectorAll('input[name="persistence-method"]').forEach((el) => {
+        el.checked = s.persistenceMethods.includes(el.value);
+      });
+    }
     if (s.startupName !== undefined) setVal("startup-name", s.startupName);
     if (s.hideConsole !== undefined) setCb('input[name="hide-console"]', s.hideConsole);
     if (s.requireAdmin !== undefined) setCb('input[name="require-admin"]', s.requireAdmin);
@@ -559,8 +563,8 @@ form?.addEventListener("submit", async (e) => {
     'input[name="enable-persistence"]',
   ).checked;
   const hasWindowsTarget = platforms.some((platform) => platform.startsWith("windows-"));
-  const persistenceMethod = hasWindowsTarget
-    ? form.querySelector("#persistence-method")?.value || "startup"
+  const persistenceMethods = hasWindowsTarget
+    ? Array.from(form.querySelectorAll('input[name="persistence-method"]:checked')).map((el) => el.value)
     : undefined;
   const startupNameVal = hasWindowsTarget
     ? (form.querySelector("#startup-name")?.value.trim() || "")
@@ -596,7 +600,7 @@ form?.addEventListener("submit", async (e) => {
     disableCgo,
     obfuscate,
     enablePersistence,
-    persistenceMethod: enablePersistence && hasWindowsTarget ? persistenceMethod : undefined,
+    persistenceMethods: enablePersistence && hasWindowsTarget ? (persistenceMethods && persistenceMethods.length > 0 ? persistenceMethods : ['startup']) : undefined,
     startupName: enablePersistence && hasWindowsTarget && startupNameVal ? startupNameVal : undefined,
     hideConsole,
     noPrinting,
