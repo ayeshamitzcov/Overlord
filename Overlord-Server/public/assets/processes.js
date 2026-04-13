@@ -1,4 +1,5 @@
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 
 const clientId = window.location.pathname.split("/")[1];
 let ws = null;
@@ -426,5 +427,5 @@ setInterval(() => {
 }, 3000);
 
 updateStatus("connecting", "Connecting...");
-connect();
+checkFeatureAccess("processes", clientId).then(ok => ok && connect());
 updateSortIndicators();

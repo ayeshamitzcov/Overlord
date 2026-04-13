@@ -4,6 +4,7 @@ import * as clientManager from "../clientManager";
 import { encodeMessage } from "../protocol";
 import * as sessionManager from "../sessions/sessionManager";
 import type { SocketData, VoiceViewer } from "../sessions/types";
+import { canUserAccessClient } from "../users";
 
 function sendVoiceCommand(clientId: string, commandType: "voice_session_start" | "voice_session_stop" | "voice_downlink", payload: Record<string, unknown>) {
   const target = clientManager.getClient(clientId);
@@ -32,7 +33,11 @@ function safeJson(ws: ServerWebSocket<SocketData>, payload: Record<string, unkno
 }
 
 export function handleVoiceViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   ws.data.sessionId = sessionId;
   const target = clientManager.getClient(clientId);

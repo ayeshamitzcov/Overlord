@@ -1,11 +1,16 @@
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 
-(function () {
+(async function () {
   const clientId = new URLSearchParams(location.search).get("clientId");
   if (!clientId) {
     alert("Missing clientId");
     return;
   }
+
+  const allowed = await checkFeatureAccess("hvnc", clientId);
+  if (!allowed) return;
+
   const clientLabel = document.getElementById("clientLabel");
   clientLabel.textContent = clientId;
 

@@ -827,6 +827,151 @@ async function wipeOfflineClients() {
   }
 }
 
+const sessionsTableBody = document.getElementById("sessions-table-body");
+const sessionsMessage = document.getElementById("sessions-message");
+const refreshSessionsBtn = document.getElementById("refresh-sessions-btn");
+
+function parseUserAgent(ua) {
+  if (!ua) return "Unknown";
+  if (ua.length > 80) return ua.substring(0, 77) + "...";
+  return ua;
+}
+
+function formatRelativeTime(epochSeconds) {
+  if (!epochSeconds) return "—";
+  const diff = Math.floor(Date.now() / 1000) - epochSeconds;
+  if (diff < 60) return "Just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function showSessionsMessage(text, type = "ok") {
+  if (!sessionsMessage) return;
+  sessionsMessage.textContent = text;
+  sessionsMessage.classList.remove(
+    "hidden",
+    "text-emerald-200", "border-emerald-700", "bg-emerald-900/30",
+    "text-rose-200", "border-rose-700", "bg-rose-900/30",
+  );
+  if (type === "error") {
+    sessionsMessage.classList.add("text-rose-200", "border-rose-700", "bg-rose-900/30");
+  } else {
+    sessionsMessage.classList.add("text-emerald-200", "border-emerald-700", "bg-emerald-900/30");
+  }
+  setTimeout(() => sessionsMessage.classList.add("hidden"), 5000);
+}
+
+async function loadSessions() {
+  if (!sessionsTableBody) return;
+
+  try {
+    const res = await fetch("/api/sessions", { credentials: "include" });
+    if (!res.ok) {
+      sessionsTableBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="px-3 py-6 text-center text-rose-300">Failed to load sessions</td>
+        </tr>
+      `;
+      return;
+    }
+
+    const data = await res.json();
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+    if (sessions.length === 0) {
+      sessionsTableBody.innerHTML = `
+        <tr>
+          <td colspan="6" class="px-3 py-6 text-center text-slate-400">No sessions found</td>
+        </tr>
+      `;
+      return;
+    }
+
+    sessionsTableBody.innerHTML = sessions
+      .map((s) => {
+        const isExpired = s.expiresAt && s.expiresAt < Math.floor(Date.now() / 1000);
+        const statusLabel = s.revoked
+          ? '<span class="text-rose-400">Revoked</span>'
+          : isExpired
+            ? '<span class="text-slate-500">Expired</span>'
+            : '<span class="text-emerald-400">Active</span>';
+        const currentBadge = s.current
+          ? ' <span class="ml-1 px-1.5 py-0.5 text-[10px] rounded bg-sky-600/30 text-sky-300 border border-sky-500/30">Current</span>'
+          : "";
+        const canRevoke = !s.revoked && !isExpired;
+
+        return `
+        <tr>
+          <td class="px-3 py-2 font-mono text-xs text-slate-100">${escapeHtml(s.ip || "—")}</td>
+          <td class="px-3 py-2 text-slate-300 text-xs max-w-[200px] truncate" title="${escapeHtml(s.userAgent || "")}">${escapeHtml(parseUserAgent(s.userAgent))}</td>
+          <td class="px-3 py-2 text-slate-400 text-xs">${formatDate(s.createdAt)}</td>
+          <td class="px-3 py-2 text-slate-400 text-xs">${formatRelativeTime(s.lastActivity)}</td>
+          <td class="px-3 py-2 text-xs">${statusLabel}${currentBadge}</td>
+          <td class="px-3 py-2 text-right">
+            ${canRevoke ? `
+              <button
+                type="button"
+                class="revoke-session-btn px-2.5 py-1.5 rounded bg-red-700/80 hover:bg-red-600 text-white text-xs"
+                data-session-id="${escapeHtml(s.id)}"
+                ${s.current ? 'data-is-current="true"' : ""}
+              >
+                <i class="fa-solid fa-right-from-bracket mr-1"></i>Revoke
+              </button>
+            ` : ""}
+          </td>
+        </tr>
+      `;
+      })
+      .join("");
+  } catch (err) {
+    sessionsTableBody.innerHTML = `
+      <tr>
+        <td colspan="6" class="px-3 py-6 text-center text-rose-300">Error loading sessions</td>
+      </tr>
+    `;
+  }
+}
+
+async function handleRevokeSessionClick(event) {
+  const button = event.target.closest(".revoke-session-btn");
+  if (!button) return;
+
+  const sessionId = button.dataset.sessionId;
+  const isCurrent = button.dataset.isCurrent === "true";
+
+  if (isCurrent) {
+    if (!confirm("This will revoke your current session and log you out. Continue?")) return;
+  }
+
+  button.disabled = true;
+
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showSessionsMessage(data.error || "Failed to revoke session", "error");
+      button.disabled = false;
+      return;
+    }
+
+    if (isCurrent) {
+      window.location.href = "/login.html";
+      return;
+    }
+
+    showSessionsMessage("Session revoked successfully");
+    await loadSessions();
+  } catch {
+    showSessionsMessage("Request failed", "error");
+    button.disabled = false;
+  }
+}
+
 async function init() {
   try {
     await loadCurrentUser();
@@ -872,6 +1017,10 @@ async function init() {
     refreshBansBtn.addEventListener("click", loadBannedIps);
     bansTableBody.addEventListener("click", handleUnbanClick);
     if (wipeOfflineBtn) wipeOfflineBtn.addEventListener("click", wipeOfflineClients);
+
+    await loadSessions();
+    if (refreshSessionsBtn) refreshSessionsBtn.addEventListener("click", loadSessions);
+    if (sessionsTableBody) sessionsTableBody.addEventListener("click", handleRevokeSessionClick);
   } catch (error) {
     console.error("settings init failed", error);
     showMessage("Failed to load settings.", "error");

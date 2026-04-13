@@ -8,6 +8,7 @@ import { logger } from "../../logger";
 import { encodeMessage } from "../../protocol";
 import { getConfig } from "../../config";
 import { isAuthorizedAgentRequest } from "../agent-auth";
+import { canUserAccessClient } from "../../users";
 
 type RequestIpProvider = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -358,6 +359,10 @@ export async function handleFileDownloadRoutes(
       return new Response("Bad request", { status: 400 });
     }
 
+    if (!canUserAccessClient(user.userId, user.role as any, clientId)) {
+      return new Response("Forbidden: client access denied", { status: 403 });
+    }
+
     logger.debug("[filebrowser] http upload request", {
       userId: user.userId,
       clientId,
@@ -596,6 +601,10 @@ export async function handleFileDownloadRoutes(
     const downloadPath = typeof body?.path === "string" ? body.path.trim() : "";
     if (!clientId || !downloadPath || !isSafeRemotePath(downloadPath)) {
       return new Response("Bad request", { status: 400 });
+    }
+
+    if (!canUserAccessClient(user.userId, user.role as any, clientId)) {
+      return new Response("Forbidden: client access denied", { status: 403 });
     }
 
     const target = clientManager.getClient(clientId);

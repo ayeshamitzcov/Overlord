@@ -209,6 +209,26 @@ function renderUsers() {
             >
               <i class="fa-solid fa-user-shield"></i>
             </button>
+            ${user.role === "operator" ? `
+            <button 
+              class="user-action-btn px-3 py-1.5 text-sm bg-amber-900/30 hover:bg-amber-900/50 text-amber-300 rounded border border-amber-800 transition-colors"
+              data-action="feature-permissions"
+              data-user-id="${user.id}"
+              data-username="${escapeHtml(user.username)}"
+              title="Feature Permissions"
+            >
+              <i class="fa-solid fa-sliders"></i>
+            </button>
+            ` : ''}
+            <button 
+              class="user-action-btn px-3 py-1.5 text-sm bg-cyan-900/30 hover:bg-cyan-900/50 text-cyan-300 rounded border border-cyan-800 transition-colors"
+              data-action="view-sessions"
+              data-user-id="${user.id}"
+              data-username="${escapeHtml(user.username)}"
+              title="View Sessions"
+            >
+              <i class="fa-solid fa-desktop"></i>
+            </button>
             <button 
               class="user-action-btn px-3 py-1.5 text-sm bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded border border-red-800 transition-colors"
               data-action="delete"
@@ -288,6 +308,12 @@ function attachActionListeners() {
         break;
       case "client-access":
         configureClientAccess(userId, username, role);
+        break;
+      case "feature-permissions":
+        configureFeaturePermissions(userId, username);
+        break;
+      case "view-sessions":
+        viewUserSessions(userId, username);
         break;
     }
   };
@@ -463,6 +489,108 @@ window.configureClientAccess = async function (userId, username, role) {
   window.location.href = `/user-client-access?${params.toString()}`;
 };
 
+const FEATURE_LABELS = {
+  console: { label: "Console", icon: "fa-terminal" },
+  remote_desktop: { label: "Remote Desktop", icon: "fa-desktop" },
+  hvnc: { label: "HVNC", icon: "fa-window-restore" },
+  webcam: { label: "Webcam", icon: "fa-video" },
+  file_browser: { label: "File Browser", icon: "fa-folder-open" },
+  processes: { label: "Processes", icon: "fa-microchip" },
+  keylogger: { label: "Keylogger", icon: "fa-keyboard" },
+  voice: { label: "Voice", icon: "fa-microphone" },
+};
+
+window.configureFeaturePermissions = async function (userId, username) {
+  try {
+    const res = await fetch(`/api/users/${userId}/feature-permissions`);
+    if (!res.ok) throw new Error("Failed to load feature permissions");
+    const data = await res.json();
+    const perms = data.permissions;
+    const features = data.features;
+
+    let modal = document.getElementById("feature-perms-modal");
+    if (modal) modal.remove();
+
+    modal = document.createElement("div");
+    modal.id = "feature-perms-modal";
+    modal.className = "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4";
+    modal.innerHTML = `
+      <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full p-6 shadow-2xl">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-xl font-bold text-slate-100">Feature Permissions</h3>
+          <button id="close-feature-modal" class="text-slate-400 hover:text-slate-200 transition-colors">
+            <i class="fa-solid fa-times text-xl"></i>
+          </button>
+        </div>
+        <p class="text-sm text-slate-400 mb-4">
+          Manage feature access for <span class="text-slate-200 font-medium">${escapeHtml(username)}</span>. 
+          Disabled features will return 403 when accessed.
+        </p>
+        <div class="space-y-2 mb-6" id="feature-toggles">
+          ${features.map(f => {
+            const meta = FEATURE_LABELS[f] || { label: f, icon: "fa-puzzle-piece" };
+            const checked = perms[f] !== false;
+            return `
+              <label class="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 cursor-pointer transition-colors">
+                <div class="flex items-center gap-3">
+                  <i class="fa-solid ${meta.icon} text-slate-400 w-5 text-center"></i>
+                  <span class="text-slate-200 font-medium">${meta.label}</span>
+                </div>
+                <input type="checkbox" data-feature="${f}" ${checked ? "checked" : ""} 
+                  class="w-5 h-5 rounded bg-slate-700 border-slate-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
+              </label>`;
+          }).join("")}
+        </div>
+        <div class="flex gap-3">
+          <button id="reset-feature-perms" class="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition-colors font-medium">
+            Reset to Defaults
+          </button>
+          <button id="save-feature-perms" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium">
+            <i class="fa-solid fa-check mr-2"></i>Save
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById("close-feature-modal").addEventListener("click", () => modal.remove());
+    modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+
+    document.getElementById("save-feature-perms").addEventListener("click", async () => {
+      const toggles = modal.querySelectorAll("[data-feature]");
+      const permissions = {};
+      toggles.forEach(t => { permissions[t.dataset.feature] = t.checked; });
+
+      try {
+        const saveRes = await fetch(`/api/users/${userId}/feature-permissions`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ permissions }),
+        });
+        if (!saveRes.ok) throw new Error("Failed to save");
+        modal.remove();
+        if (window.showToast) window.showToast("Feature permissions updated", "success");
+      } catch (err) {
+        alert("Failed to save feature permissions");
+      }
+    });
+
+    document.getElementById("reset-feature-perms").addEventListener("click", async () => {
+      if (!confirm("Reset all feature permissions to defaults (all enabled)?")) return;
+      try {
+        const delRes = await fetch(`/api/users/${userId}/feature-permissions`, { method: "DELETE" });
+        if (!delRes.ok) throw new Error("Failed to reset");
+        modal.remove();
+        if (window.showToast) window.showToast("Feature permissions reset", "success");
+      } catch (err) {
+        alert("Failed to reset feature permissions");
+      }
+    });
+  } catch (err) {
+    console.error("Feature permissions error:", err);
+    alert("Failed to load feature permissions");
+  }
+};
+
 window.toggleBuildPermission = async function (userId, username, currentCanBuild) {
   const newVal = !currentCanBuild;
   if (!confirm(`${newVal ? 'Grant' : 'Revoke'} build permission for ${username}?`)) return;
@@ -510,6 +638,125 @@ window.toggleUploadPermission = async function (userId, username, currentCanUplo
     alert("Network error. Please try again.");
   }
 };
+
+async function viewUserSessions(userId, username) {
+  try {
+    const res = await fetch(`/api/users/${userId}/sessions`);
+    if (!res.ok) throw new Error("Failed to fetch sessions");
+    const data = await res.json();
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+
+    const existing = document.getElementById("sessions-modal");
+    if (existing) existing.remove();
+
+    const modal = document.createElement("div");
+    modal.id = "sessions-modal";
+    modal.className = "fixed inset-0 z-50 flex items-center justify-center bg-black/60";
+
+    const now = Math.floor(Date.now() / 1000);
+
+    const rows = sessions.length === 0
+      ? `<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400">No sessions</td></tr>`
+      : sessions.map(s => {
+          const isExpired = s.expiresAt && s.expiresAt < now;
+          const status = s.revoked
+            ? '<span class="text-rose-400">Revoked</span>'
+            : isExpired
+              ? '<span class="text-slate-500">Expired</span>'
+              : '<span class="text-emerald-400">Active</span>';
+          const canRevoke = !s.revoked && !isExpired;
+          const lastAct = s.lastActivity ? formatRelTime(s.lastActivity) : "—";
+
+          return `<tr>
+            <td class="px-3 py-2 font-mono text-xs text-slate-100">${escapeHtml(s.ip || "—")}</td>
+            <td class="px-3 py-2 text-slate-400 text-xs">${lastAct}</td>
+            <td class="px-3 py-2 text-xs">${status}</td>
+            <td class="px-3 py-2 text-right">
+              ${canRevoke ? `<button class="admin-revoke-session-btn px-2 py-1 rounded bg-red-700/80 hover:bg-red-600 text-white text-xs" data-session-id="${escapeHtml(s.id)}"><i class="fa-solid fa-ban mr-1"></i>Revoke</button>` : ""}
+            </td>
+          </tr>`;
+        }).join("");
+
+    modal.innerHTML = `
+      <div class="bg-slate-900 border border-slate-700 rounded-xl p-5 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-slate-100">Sessions — ${escapeHtml(username)}</h3>
+          <div class="flex items-center gap-2">
+            ${sessions.some(s => !s.revoked) ? `<button id="revoke-all-sessions-btn" class="px-3 py-1.5 text-xs bg-red-700/80 hover:bg-red-600 text-white rounded border border-red-600"><i class="fa-solid fa-ban mr-1"></i>Revoke All</button>` : ""}
+            <button id="close-sessions-modal" class="px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 text-white rounded">Close</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto border border-slate-800 rounded-lg">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-800/60 text-slate-300">
+              <tr>
+                <th class="text-left px-3 py-2">IP</th>
+                <th class="text-left px-3 py-2">Last Active</th>
+                <th class="text-left px-3 py-2">Status</th>
+                <th class="text-right px-3 py-2">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800">${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal || e.target.closest("#close-sessions-modal")) {
+        modal.remove();
+      }
+    });
+
+    modal.querySelectorAll(".admin-revoke-session-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          const r = await fetch(`/api/sessions/${encodeURIComponent(btn.dataset.sessionId)}`, {
+            method: "DELETE",
+          });
+          if (!r.ok) throw new Error("Failed");
+          modal.remove();
+          viewUserSessions(userId, username);
+        } catch {
+          alert("Failed to revoke session");
+          btn.disabled = false;
+        }
+      });
+    });
+
+    const revokeAllBtn = document.getElementById("revoke-all-sessions-btn");
+    if (revokeAllBtn) {
+      revokeAllBtn.addEventListener("click", async () => {
+        if (!confirm(`Revoke all sessions for ${username}? They will be logged out immediately.`)) return;
+        revokeAllBtn.disabled = true;
+        try {
+          const r = await fetch(`/api/users/${userId}/sessions`, { method: "DELETE" });
+          if (!r.ok) throw new Error("Failed");
+          modal.remove();
+          viewUserSessions(userId, username);
+        } catch {
+          alert("Failed to revoke sessions");
+          revokeAllBtn.disabled = false;
+        }
+      });
+    }
+  } catch (err) {
+    console.error("View sessions error:", err);
+    alert("Failed to load sessions");
+  }
+}
+
+function formatRelTime(epochSeconds) {
+  if (!epochSeconds) return "—";
+  const diff = Math.floor(Date.now() / 1000) - epochSeconds;
+  if (diff < 60) return "Just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
 
 getCurrentUser();
 loadUsers();

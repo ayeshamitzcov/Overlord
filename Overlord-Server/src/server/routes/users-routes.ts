@@ -5,10 +5,13 @@ import { requirePermission } from "../../rbac";
 import {
   type ClientAccessRuleKind,
   type ClientAccessScope,
+  type FeatureName,
+  ALL_FEATURES,
   createUser,
   deleteUser,
   getUserById,
   getUserClientAccessScope,
+  getUserFeaturePermissions,
   listUsers,
   listUserClientAccessRules,
   removeUserClientAccessRule,
@@ -16,6 +19,8 @@ import {
   setUserClientAccessScope,
   setUserCanBuild,
   setUserCanUploadFiles,
+  setUserFeaturePermissions,
+  resetUserFeaturePermissions,
   updateUserPassword,
   updateUserRole,
 } from "../../users";
@@ -123,7 +128,8 @@ export async function handleUsersRoutes(
         });
 
         if (user.userId === userId && targetUser) {
-          const newToken = await generateToken(targetUser);
+          const userAgent = req.headers.get("User-Agent") || undefined;
+          const newToken = await generateToken(targetUser, { ip, userAgent });
           const sessionTtlSeconds = getSessionTtlSeconds();
           return new Response(
             JSON.stringify({
@@ -380,6 +386,83 @@ export async function handleUsersRoutes(
       });
 
       return Response.json({ success: true, canUploadFiles });
+    }
+
+    if (req.method === "GET" && url.pathname.match(/^\/api\/users\/\d+\/feature-permissions$/)) {
+      requirePermission(user, "users:manage");
+      const userId = parseInt(url.pathname.split("/")[3]);
+      const targetUser = getUserById(userId);
+      if (!targetUser) {
+        return Response.json({ error: "User not found" }, { status: 404 });
+      }
+
+      const permissions = getUserFeaturePermissions(userId);
+      return Response.json({ success: true, permissions, features: ALL_FEATURES });
+    }
+
+    if (req.method === "PUT" && url.pathname.match(/^\/api\/users\/\d+\/feature-permissions$/)) {
+      const authedUser = requirePermission(user, "users:manage");
+      const userId = parseInt(url.pathname.split("/")[3]);
+      const targetUser = getUserById(userId);
+      if (!targetUser) {
+        return Response.json({ error: "User not found" }, { status: 404 });
+      }
+
+      const body = await req.json();
+      const permissions = body?.permissions;
+      if (!permissions || typeof permissions !== "object") {
+        return Response.json({ error: "Invalid permissions object" }, { status: 400 });
+      }
+
+      const validated: Partial<Record<FeatureName, boolean>> = {};
+      for (const [key, value] of Object.entries(permissions)) {
+        if (ALL_FEATURES.includes(key as FeatureName)) {
+          validated[key as FeatureName] = !!value;
+        }
+      }
+
+      const result = setUserFeaturePermissions(userId, validated);
+      if (!result.success) {
+        return Response.json({ error: result.error }, { status: 400 });
+      }
+
+      const ip = server.requestIP(req)?.address || "unknown";
+      logAudit({
+        timestamp: Date.now(),
+        username: authedUser.username,
+        ip,
+        action: AuditAction.COMMAND,
+        details: `Updated feature permissions for ${targetUser.username}: ${JSON.stringify(validated)}`,
+        success: true,
+      });
+
+      return Response.json({ success: true, permissions: getUserFeaturePermissions(userId) });
+    }
+
+    if (req.method === "DELETE" && url.pathname.match(/^\/api\/users\/\d+\/feature-permissions$/)) {
+      const authedUser = requirePermission(user, "users:manage");
+      const userId = parseInt(url.pathname.split("/")[3]);
+      const targetUser = getUserById(userId);
+      if (!targetUser) {
+        return Response.json({ error: "User not found" }, { status: 404 });
+      }
+
+      const result = resetUserFeaturePermissions(userId);
+      if (!result.success) {
+        return Response.json({ error: result.error }, { status: 400 });
+      }
+
+      const ip = server.requestIP(req)?.address || "unknown";
+      logAudit({
+        timestamp: Date.now(),
+        username: authedUser.username,
+        ip,
+        action: AuditAction.COMMAND,
+        details: `Reset feature permissions for ${targetUser.username} to defaults`,
+        success: true,
+      });
+
+      return Response.json({ success: true });
     }
 
     return new Response("Not found", { status: 404 });

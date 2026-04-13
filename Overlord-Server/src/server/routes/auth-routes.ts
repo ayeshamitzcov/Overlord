@@ -8,13 +8,21 @@ import {
   revokeToken,
 } from "../../auth";
 import { AuditAction, logAudit } from "../../auditLog";
+import {
+  listUserSessions,
+  revokeSessionById,
+  revokeAllUserSessions,
+  hashTokenForSession,
+  persistRevokedTokenHash,
+  getSessionById,
+} from "../../db";
 import { logger } from "../../logger";
 import {
   isRateLimited,
   recordFailedAttempt,
   recordSuccessfulAttempt,
 } from "../../rateLimit";
-import { getUserById } from "../../users";
+import { getUserById, canUserAccessClient, canUserAccessFeature, type FeatureName, ALL_FEATURES } from "../../users";
 import { makeAuthCookie, makeAuthCookieClear } from "./auth-cookie";
 
 type RequestIpProvider = {
@@ -63,7 +71,8 @@ export async function handleAuthRoutes(
       const user = await authenticateUser(username, password);
 
       if (user) {
-        const token = await generateToken(user);
+        const userAgent = req.headers.get("User-Agent") || null;
+        const token = await generateToken(user, { ip, userAgent: userAgent || undefined });
         const sessionTtlSeconds = getSessionTtlSeconds();
 
         logger.info(
@@ -152,6 +161,151 @@ export async function handleAuthRoutes(
         "Set-Cookie": makeAuthCookieClear(req),
       },
     });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/sessions") {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const sessions = listUserSessions(user.userId);
+    const currentToken = extractTokenFromRequest(req);
+    const currentTokenHash = currentToken ? hashTokenForSession(currentToken) : null;
+
+    return Response.json({
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        ip: s.ip,
+        userAgent: s.userAgent,
+        createdAt: s.createdAt,
+        lastActivity: s.lastActivity,
+        expiresAt: s.expiresAt,
+        revoked: s.revoked,
+        current: s.tokenHash === currentTokenHash,
+      })),
+    });
+  }
+
+  if (req.method === "GET" && url.pathname.match(/^\/api\/users\/\d+\/sessions$/)) {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    if (user.role !== "admin") {
+      return Response.json({ error: "Admin only" }, { status: 403 });
+    }
+
+    const targetUserId = parseInt(url.pathname.split("/")[3]);
+    const sessions = listUserSessions(targetUserId);
+
+    return Response.json({
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        ip: s.ip,
+        userAgent: s.userAgent,
+        createdAt: s.createdAt,
+        lastActivity: s.lastActivity,
+        expiresAt: s.expiresAt,
+        revoked: s.revoked,
+      })),
+    });
+  }
+
+  if (req.method === "DELETE" && url.pathname.match(/^\/api\/sessions\/[^/]+$/)) {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const sessionId = url.pathname.split("/")[3];
+    const session = getSessionById(sessionId);
+
+    if (!session) {
+      return Response.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (session.userId !== user.userId && user.role !== "admin") {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const result = revokeSessionById(sessionId);
+    if (result.tokenHash) {
+      persistRevokedTokenHash(result.tokenHash, session.expiresAt);
+    }
+
+    const ip = server.requestIP(req)?.address || "unknown";
+    logAudit({
+      timestamp: Date.now(),
+      username: user.username,
+      ip,
+      action: AuditAction.LOGOUT,
+      details: `Revoked session ${sessionId}${session.userId !== user.userId ? ` (user ${session.userId})` : ""}`,
+      success: true,
+    });
+
+    return Response.json({ ok: true });
+  }
+
+  if (req.method === "DELETE" && url.pathname.match(/^\/api\/users\/\d+\/sessions$/)) {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+    if (user.role !== "admin") {
+      return Response.json({ error: "Admin only" }, { status: 403 });
+    }
+
+    const targetUserId = parseInt(url.pathname.split("/")[3]);
+
+    const sessions = listUserSessions(targetUserId).filter((s) => !s.revoked);
+    for (const s of sessions) {
+      persistRevokedTokenHash(s.tokenHash, s.expiresAt);
+    }
+
+    const count = revokeAllUserSessions(targetUserId);
+
+    const ip = server.requestIP(req)?.address || "unknown";
+    logAudit({
+      timestamp: Date.now(),
+      username: user.username,
+      ip,
+      action: AuditAction.LOGOUT,
+      details: `Revoked all ${count} sessions for user ${targetUserId}`,
+      success: true,
+    });
+
+    return Response.json({ ok: true, revokedCount: count });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/auth/feature-check") {
+    const user = await authenticateRequest(req);
+    if (!user) {
+      return Response.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const feature = url.searchParams.get("feature") as FeatureName | null;
+    const clientId = url.searchParams.get("clientId");
+
+    if (!feature || !ALL_FEATURES.includes(feature as FeatureName)) {
+      return Response.json({ error: "Invalid feature" }, { status: 400 });
+    }
+
+    const reasons: string[] = [];
+
+    if (!canUserAccessFeature(user.userId, user.role, feature)) {
+      reasons.push("feature");
+    }
+
+    if (clientId && !canUserAccessClient(user.userId, user.role, clientId)) {
+      reasons.push("client");
+    }
+
+    if (reasons.length > 0) {
+      return Response.json({ allowed: false, denied: reasons });
+    }
+
+    return Response.json({ allowed: true });
   }
 
   if (req.method === "GET" && url.pathname === "/api/auth/me") {

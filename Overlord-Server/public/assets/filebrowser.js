@@ -1,4 +1,5 @@
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 
 const clientId = window.location.pathname.split("/")[1];
 let ws = null;
@@ -2234,7 +2235,7 @@ function highlightSidebarActive() {
   });
 }
 
-connect();
+checkFeatureAccess("file_browser", clientId).then(ok => ok && connect());
 
 function addTransferToUI(transfer) {
   const transferItem = document.createElement("div");

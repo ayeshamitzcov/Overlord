@@ -11,6 +11,11 @@ import {
   persistRevokedToken,
   isTokenRevoked,
   pruneExpiredRevokedTokens,
+  createSession,
+  hashTokenForSession,
+  revokeSessionByTokenHash,
+  updateSessionActivity,
+  pruneExpiredSessions,
 } from "./db";
 
 const JWT_ISSUER = "overlord-server";
@@ -52,7 +57,10 @@ export interface AuthenticatedUser {
   role: UserRole;
 }
 
-export async function generateToken(user: User): Promise<string> {
+export async function generateToken(
+  user: User,
+  sessionMeta?: { ip?: string; userAgent?: string },
+): Promise<string> {
   const expiration = `${getSessionTtlHours()}h`;
   const token = await new SignJWT({
     sub: user.username,
@@ -65,6 +73,24 @@ export async function generateToken(user: User): Promise<string> {
     .setAudience(JWT_AUDIENCE)
     .setExpirationTime(expiration)
     .sign(getSecretKey());
+
+  const tokenHash = hashTokenForSession(token);
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = now + getSessionTtlSeconds();
+
+  try {
+    createSession({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      tokenHash,
+      ip: sessionMeta?.ip || null,
+      userAgent: sessionMeta?.userAgent || null,
+      createdAt: now,
+      expiresAt,
+    });
+  } catch (e) {
+    console.error("[auth] Failed to create session record:", e);
+  }
 
   return token;
 }
@@ -120,11 +146,16 @@ export function revokeToken(token: string): void {
 
   persistRevokedToken(token, expiresAt);
   tokenCache.delete(token);
+
+  const tokenHash = hashTokenForSession(token);
+  revokeSessionByTokenHash(tokenHash);
+
   console.log("[auth] Token revoked (persisted)");
 }
 
 export async function cleanupBlacklist(): Promise<void> {
   const pruned = pruneExpiredRevokedTokens();
+  const prunedSessions = pruneExpiredSessions();
 
   const cacheNow = Date.now();
   let cacheCleared = 0;
@@ -135,9 +166,16 @@ export async function cleanupBlacklist(): Promise<void> {
     }
   }
 
-  if (pruned > 0 || cacheCleared > 0) {
+  const activityCutoff = cacheNow - SESSION_ACTIVITY_THROTTLE * 2;
+  for (const [token, ts] of lastActivityUpdate.entries()) {
+    if (ts < activityCutoff) {
+      lastActivityUpdate.delete(token);
+    }
+  }
+
+  if (pruned > 0 || cacheCleared > 0 || prunedSessions > 0) {
     console.log(
-      `[auth] Cleaned up ${pruned} expired tokens from blacklist, ${cacheCleared} from cache`,
+      `[auth] Cleaned up ${pruned} expired tokens from blacklist, ${prunedSessions} expired sessions, ${cacheCleared} from cache`,
     );
   }
 }
@@ -178,6 +216,9 @@ export function extractTokenFromCookie(
   return null;
 }
 
+const SESSION_ACTIVITY_THROTTLE = 60_000; // 60s
+const lastActivityUpdate = new Map<string, number>();
+
 export async function authenticateRequest(
   req: Request,
 ): Promise<AuthenticatedUser | null> {
@@ -201,6 +242,15 @@ export async function authenticateRequest(
   const user = getUserById(payload.userId);
   if (!user) {
     return null;
+  }
+
+  const now = Date.now();
+  const lastUpdate = lastActivityUpdate.get(token) || 0;
+  if (now - lastUpdate > SESSION_ACTIVITY_THROTTLE) {
+    lastActivityUpdate.set(token, now);
+    try {
+      updateSessionActivity(hashTokenForSession(token));
+    } catch { }
   }
 
   return {

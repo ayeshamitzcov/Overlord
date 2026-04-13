@@ -1,4 +1,5 @@
 import { fetchVoiceCapabilities } from "./data.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 
 const params = new URLSearchParams(window.location.search);
 const clientId = params.get("clientId") || "";
@@ -470,4 +471,10 @@ window.addEventListener("beforeunload", disconnectVoice);
 updateMuteButtons();
 drawWave(localWaveCanvas, localWaveBuffer, localWaveWrite, "rgba(34, 211, 238, 0.95)");
 drawWave(remoteWaveCanvas, remoteWaveBuffer, remoteWaveWrite, "rgba(16, 185, 129, 0.95)");
-loadCapabilities();
+checkFeatureAccess("voice", clientId).then(ok => {
+  if (ok) {
+    loadCapabilities();
+  } else {
+    connectBtn.disabled = true;
+  }
+});

@@ -240,6 +240,50 @@
         </div>
       </section>
 
+      <!-- Active Sessions -->
+      <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
+              <i class="fa-solid fa-desktop text-emerald-400"></i>
+            </div>
+            <div>
+              <h2 class="text-lg font-semibold">Active Sessions</h2>
+              <p class="text-sm text-slate-400">View and manage your active login sessions.</p>
+            </div>
+          </div>
+          <button
+            id="refresh-sessions-btn"
+            class="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm transition-colors"
+            type="button"
+          >
+            <i class="fa-solid fa-rotate"></i>Refresh
+          </button>
+        </div>
+
+        <div class="overflow-x-auto border border-slate-800 rounded-lg">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-800/60 text-slate-300">
+              <tr>
+                <th class="text-left px-3 py-2">IP</th>
+                <th class="text-left px-3 py-2">Browser / Client</th>
+                <th class="text-left px-3 py-2">Created</th>
+                <th class="text-left px-3 py-2">Last Active</th>
+                <th class="text-left px-3 py-2">Status</th>
+                <th class="text-right px-3 py-2">Action</th>
+              </tr>
+            </thead>
+            <tbody id="sessions-table-body" class="divide-y divide-slate-800">
+              <tr>
+                <td colspan="6" class="px-3 py-6 text-center text-slate-400">Loading...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p id="sessions-message" class="hidden text-sm rounded-lg px-3 py-2 border"></p>
+      </section>
+
       <!-- Dashboard Preferences -->
       <section class="bg-slate-900/60 border border-slate-800 rounded-xl p-5 space-y-4">
         <div class="flex items-center gap-3">

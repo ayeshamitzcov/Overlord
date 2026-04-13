@@ -1,4 +1,5 @@
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 
 const clientId = window.location.pathname.split("/")[1];
 if (!clientId) {
@@ -712,4 +713,4 @@ fileList.addEventListener("click", (event) => {
 });
 
 import("/assets/nav.js");
-connect();
+checkFeatureAccess("keylogger", clientId).then(ok => ok && connect());

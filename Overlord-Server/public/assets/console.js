@@ -1,5 +1,6 @@
 import { ansiToHtml } from "./ansi.js";
 import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
+import { checkFeatureAccess } from "./feature-gate.js";
 const outputEl = document.getElementById("console-output");
 const statusPill = document.getElementById("status-pill");
 const clientLabel = document.getElementById("client-label");
@@ -152,4 +153,4 @@ function wireInput() {
   });
 }
 wireInput();
-connect();
+checkFeatureAccess("console", clientId).then(ok => ok && connect());

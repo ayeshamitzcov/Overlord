@@ -135,6 +135,24 @@ db.run(
 );
 
 db.run(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL,
+    last_activity INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    revoked INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);`);
+
+db.run(`
   CREATE TABLE IF NOT EXISTS builds (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
@@ -613,6 +631,14 @@ export function persistRevokedToken(token: string, expiresAt: number): void {
   );
 }
 
+export function persistRevokedTokenHash(tokenHash: string, expiresAt: number): void {
+  db.run(
+    `INSERT OR IGNORE INTO revoked_tokens (token_hash, expires_at) VALUES (?, ?)`,
+    tokenHash,
+    expiresAt,
+  );
+}
+
 export function isTokenRevoked(token: string): boolean {
   const row = db.query<{ token_hash: string }>(
     `SELECT token_hash FROM revoked_tokens WHERE token_hash=?`,
@@ -632,6 +658,110 @@ export function pruneExpiredRevokedTokens(): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.run(`DELETE FROM revoked_tokens WHERE expires_at <= ?`, now);
   return result.changes;
+}
+
+export type SessionRecord = {
+  id: string;
+  userId: number;
+  tokenHash: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: number;
+  lastActivity: number;
+  expiresAt: number;
+  revoked: boolean;
+};
+
+export function createSession(session: {
+  id: string;
+  userId: number;
+  tokenHash: string;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: number;
+  expiresAt: number;
+}): void {
+  db.run(
+    `INSERT INTO sessions (id, user_id, token_hash, ip, user_agent, created_at, last_activity, expires_at, revoked)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    session.id,
+    session.userId,
+    session.tokenHash,
+    session.ip,
+    session.userAgent,
+    session.createdAt,
+    session.createdAt,
+    session.expiresAt,
+  );
+}
+
+export function getSessionByTokenHash(tokenHash: string): SessionRecord | null {
+  const row = db.query<any>(
+    `SELECT * FROM sessions WHERE token_hash=? AND revoked=0`,
+  ).get(tokenHash);
+  if (!row) return null;
+  return mapSessionRow(row);
+}
+
+export function getSessionById(id: string): SessionRecord | null {
+  const row = db.query<any>(`SELECT * FROM sessions WHERE id=?`).get(id);
+  if (!row) return null;
+  return mapSessionRow(row);
+}
+
+export function listUserSessions(userId: number): SessionRecord[] {
+  const rows = db.query<any>(
+    `SELECT * FROM sessions WHERE user_id=? ORDER BY created_at DESC`,
+  ).all(userId);
+  return rows.map(mapSessionRow);
+}
+
+export function updateSessionActivity(tokenHash: string): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.run(`UPDATE sessions SET last_activity=? WHERE token_hash=? AND revoked=0`, now, tokenHash);
+}
+
+export function revokeSessionByTokenHash(tokenHash: string): boolean {
+  const result = db.run(`UPDATE sessions SET revoked=1 WHERE token_hash=? AND revoked=0`, tokenHash);
+  return result.changes > 0;
+}
+
+export function revokeSessionById(sessionId: string): { tokenHash: string | null } {
+  const row = db.query<{ token_hash: string }>(
+    `SELECT token_hash FROM sessions WHERE id=? AND revoked=0`,
+  ).get(sessionId);
+  if (!row) return { tokenHash: null };
+  db.run(`UPDATE sessions SET revoked=1 WHERE id=?`, sessionId);
+  return { tokenHash: row.token_hash };
+}
+
+export function revokeAllUserSessions(userId: number): number {
+  const result = db.run(`UPDATE sessions SET revoked=1 WHERE user_id=? AND revoked=0`, userId);
+  return result.changes;
+}
+
+export function pruneExpiredSessions(): number {
+  const now = Math.floor(Date.now() / 1000);
+  const result = db.run(`DELETE FROM sessions WHERE expires_at <= ?`, now);
+  return result.changes;
+}
+
+export function hashTokenForSession(token: string): string {
+  return hashToken(token);
+}
+
+function mapSessionRow(row: any): SessionRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    tokenHash: row.token_hash,
+    ip: row.ip,
+    userAgent: row.user_agent,
+    createdAt: row.created_at,
+    lastActivity: row.last_activity,
+    expiresAt: row.expires_at,
+    revoked: !!row.revoked,
+  };
 }
 
 export function markAllClientsOffline() {
