@@ -1,26 +1,27 @@
 package wire
 
 type Hello struct {
-	Type        string        `msgpack:"type"`
-	ID          string        `msgpack:"id"`
-	HWID        string        `msgpack:"hwid"`
-	Host        string        `msgpack:"host"`
-	OS          string        `msgpack:"os"`
-	Arch        string        `msgpack:"arch"`
-	Version     string        `msgpack:"version"`
-	User        string        `msgpack:"user"`
-	Monitors    int           `msgpack:"monitors"`
-	MonitorInfo []MonitorInfo `msgpack:"monitorInfo,omitempty"`
-	Country     string        `msgpack:"country,omitempty"`
-	BuildTag    string        `msgpack:"buildTag,omitempty"`
-	PublicKey   string        `msgpack:"publicKey,omitempty"`
-	Signature   string        `msgpack:"signature,omitempty"`
-	InMemory    bool          `msgpack:"inMemory,omitempty"`
-	CPU         string        `msgpack:"cpu,omitempty"`
-	GPU         string        `msgpack:"gpu,omitempty"`
-	RAM         string        `msgpack:"ram,omitempty"`
-	IsAdmin     bool          `msgpack:"isAdmin,omitempty"`
-	Elevation   string        `msgpack:"elevation,omitempty"`
+	Type        string          `msgpack:"type"`
+	ID          string          `msgpack:"id"`
+	HWID        string          `msgpack:"hwid"`
+	Host        string          `msgpack:"host"`
+	OS          string          `msgpack:"os"`
+	Arch        string          `msgpack:"arch"`
+	Version     string          `msgpack:"version"`
+	User        string          `msgpack:"user"`
+	Monitors    int             `msgpack:"monitors"`
+	MonitorInfo []MonitorInfo   `msgpack:"monitorInfo,omitempty"`
+	Country     string          `msgpack:"country,omitempty"`
+	BuildTag    string          `msgpack:"buildTag,omitempty"`
+	PublicKey   string          `msgpack:"publicKey,omitempty"`
+	Signature   string          `msgpack:"signature,omitempty"`
+	InMemory    bool            `msgpack:"inMemory,omitempty"`
+	CPU         string          `msgpack:"cpu,omitempty"`
+	GPU         string          `msgpack:"gpu,omitempty"`
+	RAM         string          `msgpack:"ram,omitempty"`
+	IsAdmin     bool            `msgpack:"isAdmin,omitempty"`
+	Elevation   string          `msgpack:"elevation,omitempty"`
+	Permissions map[string]bool `msgpack:"permissions,omitempty"`
 }
 
 type EnrollmentChallenge struct {

@@ -614,6 +614,7 @@ func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.
 	hello.RAM = hw.RAM
 	hello.IsAdmin = sysinfo.IsAdmin()
 	hello.Elevation = sysinfo.Elevation()
+	hello.Permissions = sysinfo.DarwinPermissions()
 
 	if err := wire.WriteMsg(ctx, env.Conn, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)

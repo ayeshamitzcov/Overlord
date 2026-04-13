@@ -16,7 +16,7 @@ function escapeHtml(text) {
 }
 
 function cardDigest(c) {
-  return `${c.id}|${!!c.online}|${c.lastSeen}|${c.pingMs}|${c.host}|${c.user}|${c.os}|${c.arch}|${c.version}|${c.monitors}|${c.thumbnail}|${c.country}|${c.nickname}|${c.customTag}|${c.customTagNote}|${!!c.bookmarked}|${!!c.isAdmin}|${c.elevation}|${c.cpu}|${c.gpu}|${c.ram}|${c.hwid}|${c.disconnectReason}|${c.disconnectDetail}`;
+  return `${c.id}|${!!c.online}|${c.lastSeen}|${c.pingMs}|${c.host}|${c.user}|${c.os}|${c.arch}|${c.version}|${c.monitors}|${c.thumbnail}|${c.country}|${c.nickname}|${c.customTag}|${c.customTagNote}|${!!c.bookmarked}|${!!c.isAdmin}|${c.elevation}|${c.cpu}|${c.gpu}|${c.ram}|${c.hwid}|${c.disconnectReason}|${c.disconnectDetail}|${JSON.stringify(c.permissions)}`;
 }
 
 export function createRenderer({
@@ -424,6 +424,17 @@ export function createRenderer({
             ${client.isAdmin ? `<span class="pill pill-admin"><i class="fa-solid fa-shield-halved"></i> Admin</span>` : ""}
             ${client.elevation === "system" ? `<span class="pill pill-system"><i class="fa-solid fa-gear"></i> SYSTEM</span>` : ""}
             ${client.elevation === "trustedinstaller" ? `<span class="pill pill-ti"><i class="fa-solid fa-lock"></i> TrustedInstaller</span>` : ""}
+            ${client.os === "darwin" && client.permissions ? (() => {
+              const p = client.permissions;
+              const pills = [];
+              if (p.screenRecording === true) pills.push('<span class="pill pill-perm-ok"><i class="fa-solid fa-video"></i> Screen</span>');
+              else pills.push('<span class="pill pill-perm-no"><i class="fa-solid fa-video-slash"></i> No Screen</span>');
+              if (p.accessibility === true) pills.push('<span class="pill pill-perm-ok"><i class="fa-solid fa-universal-access"></i> Accessibility</span>');
+              else pills.push('<span class="pill pill-perm-no"><i class="fa-solid fa-ban"></i> No Accessibility</span>');
+              if (p.fullDiskAccess === true) pills.push('<span class="pill pill-perm-ok"><i class="fa-solid fa-hard-drive"></i> FDA</span>');
+              else pills.push('<span class="pill pill-perm-no"><i class="fa-solid fa-lock"></i> No FDA</span>');
+              return pills.join("");
+            })() : ""}
             ${!client.online && client.disconnectReason && client.disconnectReason !== "normal" ? (() => {
               const iconMap = { panic: "fa-skull-crossbones", crash: "fa-skull", timeout: "fa-clock", network: "fa-plug-circle-xmark" };
               const colorMap = { panic: "text-red-400", crash: "text-red-400", timeout: "text-amber-400", network: "text-slate-400" };

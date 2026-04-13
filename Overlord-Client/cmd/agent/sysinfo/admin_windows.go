@@ -61,3 +61,7 @@ func isTrustedInstallerSID(sid *windows.SID) bool {
 	}
 	return false
 }
+
+func DarwinPermissions() map[string]bool {
+	return nil
+}

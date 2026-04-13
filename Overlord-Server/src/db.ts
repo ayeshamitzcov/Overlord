@@ -109,6 +109,9 @@ try {
 try {
   db.run(`ALTER TABLE clients ADD COLUMN elevation TEXT`);
 } catch {}
+try {
+  db.run(`ALTER TABLE clients ADD COLUMN permissions TEXT`);
+} catch {}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS banned_ips (
@@ -424,8 +427,8 @@ export function upsertClientRow(
 ) {
   const now = partial.lastSeen ?? Date.now();
   db.run(
-    `INSERT INTO clients (id, hwid, role, ip, host, os, arch, version, user, nickname, custom_tag, custom_tag_note, monitors, country, last_seen, online, ping_ms, enrollment_status, public_key, key_fingerprint, cpu, gpu, ram, is_admin, elevation)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?)
+    `INSERT INTO clients (id, hwid, role, ip, host, os, arch, version, user, nickname, custom_tag, custom_tag_note, monitors, country, last_seen, online, ping_ms, enrollment_status, public_key, key_fingerprint, cpu, gpu, ram, is_admin, elevation, permissions)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        hwid=COALESCE(excluded.hwid, clients.hwid),
        role=COALESCE(excluded.role, clients.role),
@@ -450,7 +453,8 @@ export function upsertClientRow(
        gpu=COALESCE(excluded.gpu, clients.gpu),
        ram=COALESCE(excluded.ram, clients.ram),
        is_admin=COALESCE(excluded.is_admin, clients.is_admin),
-       elevation=COALESCE(excluded.elevation, clients.elevation)
+       elevation=COALESCE(excluded.elevation, clients.elevation),
+       permissions=COALESCE(excluded.permissions, clients.permissions)
     `,
     partial.id,
     partial.hwid ?? partial.id,
@@ -477,6 +481,7 @@ export function upsertClientRow(
     partial.ram ?? null,
     partial.isAdmin !== undefined ? (partial.isAdmin ? 1 : 0) : null,
     partial.elevation ?? null,
+    partial.permissions ? JSON.stringify(partial.permissions) : null,
   );
 
   if (partial.hwid) {
@@ -736,7 +741,7 @@ export function listClients(filters: ListFilters): ListResult {
 
   const rows = db
     .query<any>(
-      `SELECT id, hwid, role, host, os, arch, version, user, nickname, custom_tag as customTag, custom_tag_note as customTagNote, monitors, country, last_seen as lastSeen, online, ping_ms as pingMs, bookmarked, enrollment_status as enrollmentStatus, public_key as publicKey, key_fingerprint as keyFingerprint, cpu, gpu, ram, is_admin as isAdmin, elevation, disconnect_reason as disconnectReason, disconnect_detail as disconnectDetail
+      `SELECT id, hwid, role, host, os, arch, version, user, nickname, custom_tag as customTag, custom_tag_note as customTagNote, monitors, country, last_seen as lastSeen, online, ping_ms as pingMs, bookmarked, enrollment_status as enrollmentStatus, public_key as publicKey, key_fingerprint as keyFingerprint, cpu, gpu, ram, is_admin as isAdmin, elevation, permissions, disconnect_reason as disconnectReason, disconnect_detail as disconnectDetail
        FROM clients
        ${whereSql}
        ${orderBy}
@@ -770,6 +775,7 @@ export function listClients(filters: ListFilters): ListResult {
     ram: c.ram || null,
     isAdmin: c.isAdmin === 1,
     elevation: c.elevation || null,
+    permissions: c.permissions ? (() => { try { return JSON.parse(c.permissions); } catch { return null; } })() : null,
     disconnectReason: c.disconnectReason || null,
     disconnectDetail: c.disconnectDetail || null,
     thumbnail: getThumbnail(c.id),

@@ -314,6 +314,21 @@ export function handleRemoteDesktopViewerMessage(ws: ServerWebSocket<SocketData>
   switch (payload.type) {
     case "desktop_start":
       if (!state.isStreaming) {
+        if (target.os === "darwin" && target.permissions) {
+          const missing: string[] = [];
+          if (!target.permissions.screenRecording) missing.push("screenRecording");
+          if (!target.permissions.accessibility) missing.push("accessibility");
+          if (missing.length > 0) {
+            logger.info(`[rd] macOS permission gate: client ${clientId} missing ${missing.join(", ")}`);
+            safeSendViewer(ws, {
+              type: "status",
+              status: "permissions_denied",
+              missing,
+              permissions: target.permissions,
+            });
+            break;
+          }
+        }
         sendDesktopCommand(target, "desktop_start", {});
         state.isStreaming = true;
         rdStreamingState.set(clientId, state);

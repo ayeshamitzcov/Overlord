@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package sysinfo
 
@@ -14,4 +14,8 @@ func Elevation() string {
 		return "admin"
 	}
 	return ""
+}
+
+func DarwinPermissions() map[string]bool {
+	return nil
 }

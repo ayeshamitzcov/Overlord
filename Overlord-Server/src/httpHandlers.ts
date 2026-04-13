@@ -30,6 +30,7 @@ export function handleClientsRequest(req: Request): Response {
         ...item,
         isAdmin: live.isAdmin ?? item.isAdmin,
         elevation: live.elevation ?? item.elevation,
+        permissions: live.permissions ?? item.permissions,
         ...(live.monitorInfo?.length ? {
           monitors: live.monitorInfo.length,
           monitorInfo: live.monitorInfo,

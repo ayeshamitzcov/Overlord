@@ -30,6 +30,7 @@ export type ClientInfo = {
   ram?: string;
   isAdmin?: boolean;
   elevation?: string;
+  permissions?: Record<string, boolean>;
   enrollmentStatus?: EnrollmentStatus;
   publicKey?: string;
   keyFingerprint?: string;

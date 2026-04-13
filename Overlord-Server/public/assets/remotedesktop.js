@@ -281,6 +281,20 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
       scheduleOffline(msg.reason);
       return;
     }
+    if (msg.status === "permissions_denied") {
+      clearOfflineTimer();
+      desiredStreaming = false;
+      const missing = Array.isArray(msg.missing) ? msg.missing : [];
+      const labels = {
+        screenRecording: "Screen Recording",
+        accessibility: "Accessibility",
+        fullDiskAccess: "Full Disk Access",
+      };
+      const list = missing.map(k => labels[k] || k).join(", ");
+      setStreamState("error", `macOS permissions required: ${list}`);
+      showElevateOffer(missing);
+      return;
+    }
     if (msg.status === "connecting") {
       clearOfflineTimer();
       setStreamState("connecting", "Connecting");
@@ -303,6 +317,102 @@ import { encodeMsgpack, decodeMsgpack } from "./msgpack-helpers.js";
       } else {
         setStreamState("idle", "Stopped");
       }
+    }
+  }
+
+  function showElevateOffer(missing) {
+    // Remove previous elevate banner if any
+    const prev = document.getElementById("rdElevateBanner");
+    if (prev) prev.remove();
+
+    const banner = document.createElement("div");
+    banner.id = "rdElevateBanner";
+    banner.className = "flex flex-col items-center gap-3 p-4 rounded-lg border border-amber-700/70 bg-amber-900/30 text-amber-100 text-sm";
+
+    const labels = {
+      screenRecording: "Screen Recording",
+      accessibility: "Accessibility",
+      fullDiskAccess: "Full Disk Access",
+    };
+    const list = missing.map(k => labels[k] || k).join(", ");
+
+    banner.innerHTML = `
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
+        <span><strong>macOS permissions missing:</strong> ${list}</span>
+      </div>
+      <div class="text-xs text-amber-300/80">
+        The client needs elevated privileges to grant these permissions. Enter the user's password to elevate.
+      </div>
+      <div class="flex items-center gap-2">
+        <input id="rdElevatePwd" type="password" placeholder="User password" autocomplete="off"
+          class="px-3 py-1.5 rounded bg-slate-800 border border-slate-600 text-slate-100 text-sm focus:outline-none focus:border-amber-500" />
+        <button id="rdElevateBtn" class="button primary text-sm px-4 py-1.5">
+          <i class="fa-solid fa-bolt"></i> Elevate
+        </button>
+        <button id="rdElevateDismiss" class="button ghost text-sm px-3 py-1.5">Dismiss</button>
+      </div>
+      <div id="rdElevateStatus" class="text-xs text-slate-400 hidden"></div>
+    `;
+
+    // Insert banner above the canvas area
+    if (canvasContainer && canvasContainer.parentNode) {
+      canvasContainer.parentNode.insertBefore(banner, canvasContainer);
+    }
+
+    const elevateBtn = document.getElementById("rdElevateBtn");
+    const pwdInput = document.getElementById("rdElevatePwd");
+    const statusDiv = document.getElementById("rdElevateStatus");
+    const dismissBtn = document.getElementById("rdElevateDismiss");
+
+    if (dismissBtn) {
+      dismissBtn.addEventListener("click", () => banner.remove());
+    }
+
+    if (elevateBtn && pwdInput) {
+      elevateBtn.addEventListener("click", async () => {
+        const password = pwdInput.value.trim();
+        if (!password) {
+          pwdInput.focus();
+          return;
+        }
+        elevateBtn.disabled = true;
+        elevateBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Elevating...';
+        if (statusDiv) {
+          statusDiv.classList.remove("hidden");
+          statusDiv.textContent = "Sending elevation request...";
+        }
+        try {
+          const res = await fetch(`/api/clients/${encodeURIComponent(activeClientId)}/command`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "elevate", password }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            if (statusDiv) {
+              statusDiv.textContent = "Elevation successful — client is restarting with elevated permissions. It will reconnect shortly.";
+              statusDiv.className = "text-xs text-emerald-400";
+            }
+            elevateBtn.textContent = "Done";
+            // The client will disconnect and reconnect; the viewer should auto-recover
+          } else {
+            if (statusDiv) {
+              statusDiv.textContent = `Elevation failed: ${data.message || "Unknown error"}`;
+              statusDiv.className = "text-xs text-rose-400";
+            }
+            elevateBtn.disabled = false;
+            elevateBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Retry';
+          }
+        } catch (err) {
+          if (statusDiv) {
+            statusDiv.textContent = `Request failed: ${err.message}`;
+            statusDiv.className = "text-xs text-rose-400";
+          }
+          elevateBtn.disabled = false;
+          elevateBtn.innerHTML = '<i class="fa-solid fa-bolt"></i> Retry';
+        }
+      });
     }
   }
 
