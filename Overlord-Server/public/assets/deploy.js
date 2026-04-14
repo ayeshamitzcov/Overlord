@@ -171,7 +171,8 @@ function filterAndRenderClients() {
       (c.host && c.host.toLowerCase().includes(searchTerm)) ||
       c.id.toLowerCase().includes(searchTerm) ||
       (c.os && c.os.toLowerCase().includes(searchTerm)) ||
-      (c.user && c.user.toLowerCase().includes(searchTerm));
+      (c.user && c.user.toLowerCase().includes(searchTerm)) ||
+      (c.nickname && c.nickname.toLowerCase().includes(searchTerm));
 
     const matchesOs = osValue === "all" || (c.os || "unknown") === osValue;
 

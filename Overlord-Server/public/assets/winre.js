@@ -129,7 +129,8 @@ function filterAndRenderClients() {
       !searchTerm ||
       (c.host && c.host.toLowerCase().includes(searchTerm)) ||
       c.id.toLowerCase().includes(searchTerm) ||
-      (c.user && c.user.toLowerCase().includes(searchTerm))
+      (c.user && c.user.toLowerCase().includes(searchTerm)) ||
+      (c.nickname && c.nickname.toLowerCase().includes(searchTerm))
     );
   });
   renderClients();
