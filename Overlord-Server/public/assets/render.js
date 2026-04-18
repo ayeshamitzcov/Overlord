@@ -403,7 +403,7 @@ export function createRenderer({
     };
     const gpuHtml = dedupeGpu(client.gpu);
     const borderClass = client.bookmarked ? "border-yellow-600/60" : "border-slate-800";
-    card.className = `card rounded-xl border ${borderClass} bg-slate-900/70 p-4 shadow-lg ${client.online ? "" : "card-offline"} tone-${os.tone}`;
+    card.className = `card rounded-xl border ${borderClass} p-4 ${client.online ? "" : "card-offline"}`;
     if (!client.bookmarked && groupColor) {
       card.style.setProperty("--group-color", groupColor);
     } else {
@@ -494,8 +494,8 @@ export function createRenderer({
         <div class="flex items-center gap-3">
           <button class="bookmark-btn inline-flex items-center justify-center w-9 h-9 rounded-lg border ${client.bookmarked ? "border-yellow-600 bg-yellow-900/50 text-yellow-300" : "border-slate-700 bg-slate-800/50 text-slate-500 hover:text-yellow-300 hover:border-yellow-700"} transition-colors" data-id="${escapeHtml(client.id)}" title="${client.bookmarked ? "Remove bookmark" : "Bookmark"}"><i class="fa-${client.bookmarked ? "solid" : "regular"} fa-star"></i></button>
           <span class="text-emerald-300 font-mono text-sm inline-flex items-center gap-2"><i class="fa-solid fa-satellite-dish"></i> ${formatPing(client.pingMs)}</span>
-          ${isViewer ? "" : `<button class="command-btn inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-800 bg-slate-800/70 hover:bg-slate-700" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-bars"></i> Commands</button>`}
-          ${isViewer ? "" : `<button class="ban-btn inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-red-800 bg-red-900/60 hover:bg-red-800 text-red-100" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-ban"></i> Ban</button>`}
+          ${isViewer ? "" : `<button class="command-btn inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700/60 bg-slate-800/70 hover:bg-slate-700/70" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-bars"></i> Commands</button>`}
+          ${isViewer ? "" : `<button class="ban-btn inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-red-900/60 bg-red-950/40 hover:bg-red-900/50 text-red-300" data-id="${escapeHtml(client.id)}"><i class="fa-solid fa-ban"></i> Ban</button>`}
         </div>
       </div>
     `;
