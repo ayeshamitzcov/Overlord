@@ -177,6 +177,38 @@ set CGO_ENABLED=0
 if errorlevel 1 goto :err
 set GOARM=
 
+echo WARNING: iOS targets are experimental (POC). Most features will be stubbed.
+
+echo == Building agent for ios arm64 ==
+set GOOS=darwin
+set GOARCH=arm64
+set CGO_ENABLED=0
+if "%NO_PRINTING%"=="true" (
+    %BUILD_CMD% -tags "ios_target noprint" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-arm64" ./cmd/agent
+) else (
+    %BUILD_CMD% -tags "ios_target" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-arm64" ./cmd/agent
+)
+if errorlevel 1 goto :err
+
+echo == Building agent for ios amd64 (simulator) ==
+set GOOS=darwin
+set GOARCH=amd64
+set CGO_ENABLED=0
+if "%NO_PRINTING%"=="true" (
+    %BUILD_CMD% -tags "ios_target noprint" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-amd64" ./cmd/agent
+) else (
+    %BUILD_CMD% -tags "ios_target" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-amd64" ./cmd/agent
+)
+set GOOS=darwin
+set GOARCH=amd64
+set CGO_ENABLED=0
+if "%NO_PRINTING%"=="true" (
+    %BUILD_CMD% -tags "ios_target noprint" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-amd64" ./cmd/agent
+) else (
+    %BUILD_CMD% -tags "ios_target" -ldflags="%LDFLAGS%" -o "%OUT_DIR%\agent-ios-amd64" ./cmd/agent
+)
+if errorlevel 1 goto :err
+
 echo == Building agent for openbsd amd64 ==
 set GOOS=openbsd
 set GOARCH=amd64

@@ -1,5 +1,4 @@
-//go:build darwin
-// +build darwin
+//go:build darwin && !ios && !ios_target
 
 package persistence
 

@@ -34,6 +34,8 @@ export const ALLOWED_PLATFORMS = new Set([
   "android-arm64",
   "android-amd64",
   "android-armv7",
+  "ios-arm64",
+  "ios-amd64",
 ]);
 
 export const ALLOWED_OS_FILTERS = new Set([
@@ -42,4 +44,5 @@ export const ALLOWED_OS_FILTERS = new Set([
   "darwin",
   "android",
   "freebsd",
+  "ios",
 ]);

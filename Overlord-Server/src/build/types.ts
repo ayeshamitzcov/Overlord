@@ -41,4 +41,5 @@ export type BuildConfig = {
   solMemo?: boolean;
   solAddress?: string;
   solRpcEndpoints?: string;
+  iosBundleId?: string;
 };

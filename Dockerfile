@@ -20,6 +20,7 @@ RUN apt-get update \
        git \
        unzip \
        upx-ucl \
+       zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go (latest stable version)
@@ -57,6 +58,17 @@ RUN case "${TARGETARCH}" in \
     && unzip -q android-ndk-${ANDROID_NDK_VERSION}-linux.zip \
     && mv android-ndk-${ANDROID_NDK_VERSION} ${ANDROID_NDK_HOME} \
     && rm android-ndk-${ANDROID_NDK_VERSION}-linux.zip
+
+RUN case "${TARGETARCH}" in \
+        amd64) LDID_ARCH="x86_64" ;; \
+        arm64) LDID_ARCH="aarch64" ;; \
+        *) LDID_ARCH="" ;; \
+    esac \
+    && if [ -n "${LDID_ARCH}" ]; then \
+        wget -q "https://github.com/ProcursusTeam/ldid/releases/download/v2.1.5-procursus7/ldid_linux_${LDID_ARCH}" \
+            -O /usr/local/bin/ldid \
+        && chmod +x /usr/local/bin/ldid; \
+    fi
 
 # Copy package files and lockfile
 COPY Overlord-Server/package.json Overlord-Server/bun.lock* ./

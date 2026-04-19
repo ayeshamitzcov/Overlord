@@ -120,6 +120,14 @@
                         <input type="checkbox" name="platform" value="android-armv7" class="w-4 h-4" />
                         <span><i class="fa-brands fa-android text-green-400"></i> Android ARMv7</span>
                       </label>
+                      <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-white transition-colors">
+                        <input type="checkbox" name="platform" value="ios-arm64" class="w-4 h-4" />
+                        <span><i class="fa-brands fa-apple text-slate-200"></i> iOS ARM64</span>
+                      </label>
+                      <label class="flex items-center gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg cursor-pointer hover:border-white transition-colors">
+                        <input type="checkbox" name="platform" value="ios-amd64" class="w-4 h-4" />
+                        <span><i class="fa-brands fa-apple text-slate-200"></i> iOS Simulator x64</span>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -174,6 +182,15 @@
                         class="w-full px-3 py-2 bg-slate-800/60 border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500 transition-colors" />
                       <p class="text-xs text-slate-500 mt-1">
                         Optional: Custom name prefix for output binaries (letters, numbers, . _ - only)
+                      </p>
+                    </div>
+
+                    <div id="ios-bundle-id-container" class="hidden">
+                      <label class="block text-sm font-medium text-slate-300 mb-2" for="ios-bundle-id">iOS Bundle ID</label>
+                      <input type="text" id="ios-bundle-id" name="ios-bundle-id" placeholder="com.overlord.agent (default)"
+                        class="w-full px-3 py-2 bg-slate-800/60 border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500 transition-colors" />
+                      <p class="text-xs text-slate-500 mt-1">
+                        Bundle identifier for the iOS IPA package (e.g. <code>com.example.myapp</code>). Used in Info.plist.
                       </p>
                     </div>
 

@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !ios && !ios_target
 
 package handlers
 

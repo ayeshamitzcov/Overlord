@@ -79,6 +79,7 @@ export async function handleBuildRoutes(
         outputExtension,
         sleepSeconds,
         boundFiles,
+        iosBundleId,
       } = body;
 
       if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
@@ -227,7 +228,8 @@ export async function handleBuildRoutes(
           ? startupName.trim()
           : undefined;
       const hasDarwinTarget = allowedPlatforms.some((p) => p.startsWith('darwin-'));
-      if (hasDarwinTarget && safeStartupName && !safeStartupName.startsWith('com.')) {
+      const hasIosTarget = allowedPlatforms.some((p) => p.startsWith('ios-'));
+      if ((hasDarwinTarget || hasIosTarget) && safeStartupName && !safeStartupName.startsWith('com.')) {
         return Response.json(
           { error: 'Startup name for macOS must start with "com." (e.g. com.apple.updater)' },
           { status: 400 },
@@ -340,6 +342,7 @@ export async function handleBuildRoutes(
         outputExtension: safeOutputExtension,
         sleepSeconds: safeSleepSeconds,
         boundFiles: safeBoundFiles,
+        iosBundleId: typeof iosBundleId === "string" && /^[a-zA-Z0-9.-]{1,128}$/.test(iosBundleId.trim()) ? iosBundleId.trim() : undefined,
       });
 
       return Response.json({ buildId });

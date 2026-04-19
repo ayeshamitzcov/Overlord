@@ -377,6 +377,7 @@ function getSelectedPlatformFamilies() {
     windows: selectedPlatforms.some((platform) => platform.startsWith("windows-")),
     linux: selectedPlatforms.some((platform) => platform.startsWith("linux-")),
     darwin: selectedPlatforms.some((platform) => platform.startsWith("darwin-")),
+    ios: selectedPlatforms.some((platform) => platform.startsWith("ios-")),
   };
 }
 
@@ -384,8 +385,8 @@ function validateStartupName() {
   if (!startupNameError) return true;
   const families = getSelectedPlatformFamilies();
   const val = document.getElementById("startup-name")?.value.trim() || "";
-  if (families.darwin && val && !val.startsWith("com.")) {
-    startupNameError.textContent = "macOS requires the name to start with \"com.\" (e.g. com.apple.updater)";
+  if ((families.darwin || families.ios) && val && !val.startsWith("com.")) {
+    startupNameError.textContent = "macOS/iOS requires the name to start with \"com.\" (e.g. com.apple.updater)";
     startupNameError.classList.remove("hidden");
     return false;
   }
@@ -439,9 +440,19 @@ if (persistenceCheckbox && persistenceMethodContainer) {
 platformInputs.forEach((input) => {
   input.addEventListener("change", updatePersistenceSettingsVisibility);
   input.addEventListener("change", updateWindowsSectionVisibility);
+  input.addEventListener("change", updateIosSectionVisibility);
 });
 
 document.getElementById("startup-name")?.addEventListener("input", validateStartupName);
+
+function updateIosSectionVisibility() {
+  const families = getSelectedPlatformFamilies();
+  const iosBundleIdContainer = document.getElementById("ios-bundle-id-container");
+  if (iosBundleIdContainer) {
+    iosBundleIdContainer.classList.toggle("hidden", !families.ios);
+  }
+}
+updateIosSectionVisibility();
 
 updatePersistenceSettingsVisibility();
 
@@ -1123,15 +1134,17 @@ form?.addEventListener("submit", async (e) => {
     boundFiles: boundFiles.length > 0
       ? boundFiles.map((f) => ({ name: f.name, data: f.base64, targetOS: f.targetOS, execute: f.execute }))
       : undefined,
+    iosBundleId: platforms.some(p => p.startsWith('ios-')) ? (form.querySelector("#ios-bundle-id")?.value.trim() || undefined) : undefined,
   };
 
   const hasAndroid = platforms.some(p => p.startsWith('android-'));
   const hasBsd = platforms.some(
     p => p.startsWith('freebsd-') || p.startsWith('openbsd-'),
   );
+  const hasIos = platforms.some(p => p.startsWith('ios-'));
 
-  if (hasAndroid || hasBsd) {
-    let warningText = 'WARNING: Some selected targets are severely untested and will probably not work right.\n\n';
+  if (hasAndroid || hasBsd || hasIos) {
+    let warningText = 'WARNING: Some selected targets are experimental/untested.\n\n';
 
     if (hasAndroid) {
       warningText += '- Android targets are severely untested and will probably not work right.\n';
@@ -1139,6 +1152,10 @@ form?.addEventListener("submit", async (e) => {
 
     if (hasBsd) {
       warningText += '- BSD targets are severely untested and will probably not work right.\n';
+    }
+
+    if (hasIos) {
+      warningText += '- iOS targets are experimental (POC). Most features will be stubbed. Output will be packaged as IPA if possible.\n';
     }
 
     warningText += '\nContinue with build anyway?';

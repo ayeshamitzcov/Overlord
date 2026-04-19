@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && !ios && !ios_target
 
 package plugins
 
