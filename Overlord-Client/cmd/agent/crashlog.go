@@ -14,6 +14,7 @@ import (
 const crashLogFileName = "crashlogC.log"
 
 func handleFatalPanic() {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if r := recover(); r != nil {
 		reason := fmt.Sprintf("panic: %v", r)
 		stack := debug.Stack()

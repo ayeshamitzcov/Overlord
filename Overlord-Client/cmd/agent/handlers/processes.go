@@ -33,6 +33,7 @@ func HandleProcessList(ctx context.Context, env *runtime.Env, cmdID string) erro
 }
 
 func HandleProcessKill(ctx context.Context, env *runtime.Env, cmdID string, pid int32) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	log.Printf("process_kill: %d", pid)
 
 	err := killProcess(pid)

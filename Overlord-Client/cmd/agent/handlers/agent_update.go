@@ -18,6 +18,7 @@ import (
 )
 
 func HandleAgentUpdate(ctx context.Context, env *agentRuntime.Env, cmdID string, sourcePath string, expectedHash string, hideWindow bool) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {
 		return wire.WriteMsg(ctx, env.Conn, wire.CommandResult{Type: "command_result", CommandID: cmdID, OK: false, Message: "missing update path"})

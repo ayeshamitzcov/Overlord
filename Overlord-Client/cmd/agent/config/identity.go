@@ -18,6 +18,7 @@ type Identity struct {
 }
 
 func DeriveIdentity() Identity {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	hwid := deriveHWID()
 	machineID := platformMachineID()
 	if machineID == "" {

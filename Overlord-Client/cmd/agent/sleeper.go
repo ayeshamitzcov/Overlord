@@ -3,6 +3,7 @@ package main
 import "time"
 
 func sleepObfuscated(seconds int) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if seconds <= 0 {
 		return
 	}

@@ -75,6 +75,7 @@ type Config struct {
 }
 
 func Load() Config {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	server := strings.TrimSpace(os.Getenv("OVERLORD_SERVER"))
 	if server == "" {
 		server = DefaultServerURL

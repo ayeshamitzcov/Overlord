@@ -122,6 +122,7 @@ func (m *Manager) FinalizeBundle(ctx context.Context, pluginId string) error {
 }
 
 func (m *Manager) Load(ctx context.Context, manifest PluginManifest, binary []byte) error {
+	//garble:controlflow block_splits=max junk_jumps=max flatten_passes=max
 	if len(binary) == 0 {
 		return errors.New("empty plugin binary")
 	}

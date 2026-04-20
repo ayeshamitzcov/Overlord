@@ -23,6 +23,7 @@ import (
 )
 
 func Loop(ctx context.Context, env *rt.Env) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	defer recoverAndLog("capture loop", env.Cancel)
 	logCodecSupport()
 
@@ -85,6 +86,7 @@ func CaptureDisplayRGBA(display int) (*image.RGBA, error) {
 }
 
 func CaptureAndSend(ctx context.Context, env *rt.Env) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	defer recoverAndLog("capture send", env.Cancel)
 
 	displays := activeDisplays()

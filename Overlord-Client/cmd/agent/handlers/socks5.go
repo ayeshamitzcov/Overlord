@@ -23,6 +23,7 @@ type tunnelConn struct {
 }
 
 func HandleProxyConnect(ctx context.Context, env *runtime.Env, connID string, payload map[string]interface{}) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	host, _ := payload["host"].(string)
 	portRaw := payload["port"]
 	var port int

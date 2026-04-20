@@ -18,6 +18,7 @@ var SkipDirs = map[string]bool{
 type ResultFunc func(path string)
 
 func LookupExe(exeName string, workers int, onResult ResultFunc) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if workers <= 0 {
 		workers = 8
 	}

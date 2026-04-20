@@ -25,6 +25,7 @@ var (
 )
 
 func Start(ctx context.Context, env *runtime.Env) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if env == nil {
 		return nil
 	}

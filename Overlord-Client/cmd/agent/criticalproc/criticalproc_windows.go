@@ -19,6 +19,7 @@ var (
 const processBreakOnTermination = 29
 
 func Setup() {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		log.Printf("[criticalproc] not running as administrator, skipping critical process flag")
 		return

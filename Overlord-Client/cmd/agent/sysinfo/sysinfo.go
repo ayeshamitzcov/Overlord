@@ -7,5 +7,6 @@ type Info struct {
 }
 
 func Collect() Info {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	return collectPlatform()
 }

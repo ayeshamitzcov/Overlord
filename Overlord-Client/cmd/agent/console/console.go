@@ -34,6 +34,7 @@ func shellCommand() []string {
 }
 
 func Start(ctx context.Context, env *rt.Env, sessionID string, _ int, _ int) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if sessionID == "" {
 		return errors.New("session id required")
 	}

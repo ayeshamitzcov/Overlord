@@ -9,6 +9,7 @@ import (
 )
 
 func Acquire(name string) (func(), bool, error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if name == "" {
 		return func() {}, true, nil
 	}

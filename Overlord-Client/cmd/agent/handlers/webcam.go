@@ -10,6 +10,7 @@ import (
 )
 
 func WebcamStart(ctx context.Context, env *rt.Env) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	fps := env.WebcamFPS
 	if fps <= 0 {
 		fps = 30

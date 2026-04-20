@@ -27,6 +27,7 @@ func GetPersistedDisplay() int {
 }
 
 func DesktopStart(ctx context.Context, env *rt.Env) error {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	interval, fps := streamInterval("OVERLORD_DESKTOP_MAX_FPS", 120)
 	if fps < 60 {
 		fps = 60

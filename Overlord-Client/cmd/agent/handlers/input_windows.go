@@ -98,6 +98,7 @@ func sendMouseUp(button int) {
 }
 
 func sendMouseInput(flags uint32, mouseData uint32) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	var inp input
 	inp.inputType = INPUT_MOUSE
 	mi := (*mouseInput)(unsafe.Pointer(&inp.union[0]))
@@ -165,6 +166,7 @@ func sendKeyUp(vk uint16) {
 }
 
 func sendKeyInput(vk uint16, keyUp bool) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	var inp input
 	inp.inputType = INPUT_KEYBOARD
 	ki := (*keybdInput)(unsafe.Pointer(&inp.union[0]))

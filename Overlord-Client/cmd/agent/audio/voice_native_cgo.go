@@ -173,6 +173,7 @@ func findSystemCaptureDevice(ctx malgo.Context) (*malgo.DeviceID, string, bool) 
 }
 
 func StartVoiceSession(parent context.Context, source string, onCapture func([]byte)) (*Session, error) {
+	//garble:controlflow block_splits=10 junk_jumps=10 flatten_passes=2
 	if onCapture == nil {
 		return nil, errors.New("voice capture callback is required")
 	}
