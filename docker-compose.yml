@@ -47,6 +47,7 @@ services:
       - overlord-data:/app/data
       - overlord-certs:/app/certs
       - overlord-client-build-cache:/app/client-build-cache
+      - overlord-plugins:/app/plugins
       # Uncomment to mount host certbot certs read-only
       # - /etc/letsencrypt:/etc/letsencrypt:ro
       # Uncomment to use a static config file instead of env vars
@@ -67,3 +68,4 @@ volumes:
   overlord-data:
   overlord-certs:
   overlord-client-build-cache:
+  overlord-plugins:
