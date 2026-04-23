@@ -7,6 +7,7 @@ package handlers
 func setCursorPos(x, y int32)        {}
 func sendMouseDown(button int)       {}
 func sendMouseUp(button int)         {}
+func sendMouseWheel(delta int32)     {}
 func sendKeyDown(vk uint16)          {}
 func sendKeyUp(vk uint16)            {}
 func sendTextInput(text string)      {}
