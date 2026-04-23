@@ -11,5 +11,4 @@ export const state = {
   isLoading: false,
   pendingForce: false,
   pendingReorder: false,
-  thumbnailsRequested: false,
 };

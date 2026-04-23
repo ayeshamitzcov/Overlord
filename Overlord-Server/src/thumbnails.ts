@@ -1,9 +1,17 @@
-let _sharp: typeof import("sharp") extends { default: infer D } ? D : never;
-async function getSharp() {
-  if (!_sharp) {
-    _sharp = (await import("sharp")).default;
+let _sharp: (typeof import("sharp") extends { default: infer D } ? D : never) | null = null;
+let _sharpLoadAttempted = false;
+
+async function getSharp(): Promise<typeof import("sharp") extends { default: infer D } ? D : never> {
+  if (_sharp) return _sharp;
+  if (_sharpLoadAttempted) throw new Error("sharp module unavailable");
+  _sharpLoadAttempted = true;
+  try {
+    _sharp = (await import("sharp")).default as any;
+    return _sharp!;
+  } catch (err) {
+    console.error("[thumbnails] Failed to load sharp module. Thumbnails will be unavailable.", err);
+    throw err;
   }
-  return _sharp;
 }
 
 const THUMBNAIL_WIDTH = Math.max(64, Number(process.env.OVERLORD_THUMBNAIL_WIDTH || 640));
@@ -80,7 +88,8 @@ export async function generateThumbnail(id: string): Promise<boolean> {
     thumbnails.set(id, dataUrl);
     latestFrames.delete(id);
     return true;
-  } catch {
+  } catch (err) {
+    console.error(`[thumbnails] Failed to generate thumbnail for client ${id}:`, err);
     return false;
   }
 }

@@ -4,12 +4,14 @@ import { digestData } from "./utils.js";
 const POLL_INTERVAL_MS = 5000;
 const FALLBACK_POLL_MS = 30000;
 const PREF_REFRESH_KEY = "overlord_refresh_interval_seconds";
+const THUMBNAIL_COOLDOWN_MS = 60000;
 let pollTimer = null;
 let render = () => {};
 let dashboardWs = null;
 let dashboardWsConnected = false;
 let wsReconnectTimer = null;
 const manuallyDisconnecting = new Set();
+const thumbnailRequestedAt = new Map();
 
 function moveClientCardImmediately(msg) {
   const clientId = typeof msg?.clientId === "string" ? msg.clientId : "";
@@ -74,10 +76,7 @@ export async function loadWithOptions(options = {}) {
     const pag = document.getElementById("pagination");
     if (pag) pag.style.visibility = "";
     
-    if (!state.thumbnailsRequested) {
-      state.thumbnailsRequested = true;
-      requestThumbnailsForClients(data.items);
-    }
+    requestThumbnailsForClients(data.items);
   } catch (err) {
     console.error("load clients", err);
   } finally {
@@ -93,8 +92,14 @@ export async function loadWithOptions(options = {}) {
 }
 
 async function requestThumbnailsForClients(items) {
-  const onlineClientsWithoutThumbnail = items.filter(c => c.online && !c.thumbnail);
+  const now = Date.now();
+  const onlineClientsWithoutThumbnail = items.filter(c => {
+    if (!c.online || c.thumbnail) return false;
+    const last = thumbnailRequestedAt.get(c.id);
+    return !last || now - last > THUMBNAIL_COOLDOWN_MS;
+  });
   for (const client of onlineClientsWithoutThumbnail) {
+    thumbnailRequestedAt.set(client.id, now);
     await requestThumbnail(client.id);
   }
 }
@@ -176,6 +181,7 @@ function connectDashboardWs() {
     console.warn("[dashboard] ws closed");
     dashboardWs = null;
     dashboardWsConnected = false;
+    thumbnailRequestedAt.clear();
     adjustPollingForWs();
     scheduleDashboardReconnect();
   };
